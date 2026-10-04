@@ -44,6 +44,8 @@ jobs:
           make
           make test
           make install
+          cd ..
+          rm -rf _uniform_http
 
       - name: Install dependencies
         run: cpanm --notest --installdeps .
