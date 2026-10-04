@@ -1178,6 +1178,57 @@ get_stream_local_close(self, stream_id)
         RETVAL
 
 int
+_submit_request_uniform_native(self, view_av, provider_sv)
+        SV *self
+        AV *view_av
+        SV *provider_sv
+    PREINIT:
+        unblock_h2_session *ps;
+        nghttp2_nv *nva;
+        size_t nvlen;
+        nghttp2_data_provider data_provider;
+        nghttp2_data_provider *data_provider_ptr = NULL;
+        unblock_h2_provider *provider = NULL;
+        int32_t stream_id;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        nva = uniform_request_to_nva(aTHX_ view_av, &nvlen);
+
+        if (SvOK(provider_sv)) {
+            if (!SvROK(provider_sv) || SvTYPE(SvRV(provider_sv)) != SVt_PVCV) {
+                if (nva) free(nva);
+                croak("request data provider must be a coderef");
+            }
+            provider = (unblock_h2_provider *)calloc(1, sizeof(*provider));
+            if (!provider) {
+                if (nva) free(nva);
+                croak("unable to allocate HTTP/2 data provider");
+            }
+            provider->callback = newSVsv(provider_sv);
+            data_provider.source.ptr = provider;
+            data_provider.read_callback = provider_read_callback;
+            data_provider_ptr = &data_provider;
+        }
+
+        stream_id = nghttp2_submit_request(
+            ps->session, NULL, nva, nvlen, data_provider_ptr, NULL);
+        if (nva) free(nva);
+
+        if (stream_id < 0) {
+            if (provider) free_provider(aTHX_ provider);
+            croak("nghttp2_submit_request failed (%d): %s",
+                (int)stream_id, nghttp2_strerror((int)stream_id));
+        }
+
+        if (provider) {
+            provider->stream_id = stream_id;
+            add_provider(aTHX_ ps, provider);
+        }
+        RETVAL = stream_id;
+    OUTPUT:
+        RETVAL
+
+int
 _submit_request_native(self, headers_av, provider_sv)
         SV *self
         AV *headers_av
@@ -1225,6 +1276,76 @@ _submit_request_native(self, headers_av, provider_sv)
             add_provider(aTHX_ ps, provider);
         }
         RETVAL = stream_id;
+    OUTPUT:
+        RETVAL
+
+int
+_submit_response_uniform_no_body_native(self, stream_id, view_av)
+        SV *self
+        int stream_id
+        AV *view_av
+    PREINIT:
+        unblock_h2_session *ps;
+        nghttp2_nv *nva;
+        size_t nvlen;
+        int rv;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        rv = nghttp2_submit_response(ps->session, stream_id, nva, nvlen, NULL);
+        if (nva) free(nva);
+        if (rv != 0) {
+            croak("nghttp2_submit_response failed (%d): %s",
+                rv, nghttp2_strerror(rv));
+        }
+        RETVAL = rv;
+    OUTPUT:
+        RETVAL
+
+int
+_submit_response_uniform_streaming_native(self, stream_id, view_av, provider_sv)
+        SV *self
+        int stream_id
+        AV *view_av
+        SV *provider_sv
+    PREINIT:
+        unblock_h2_session *ps;
+        nghttp2_nv *nva;
+        size_t nvlen;
+        nghttp2_data_provider data_provider;
+        unblock_h2_provider *provider;
+        int rv;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        if (find_provider(ps, stream_id)) {
+            croak("stream %d already has a data provider", stream_id);
+        }
+        if (!SvROK(provider_sv) || SvTYPE(SvRV(provider_sv)) != SVt_PVCV) {
+            croak("response data provider must be a coderef");
+        }
+
+        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        provider = (unblock_h2_provider *)calloc(1, sizeof(*provider));
+        if (!provider) {
+            if (nva) free(nva);
+            croak("unable to allocate HTTP/2 data provider");
+        }
+        provider->stream_id = stream_id;
+        provider->callback = newSVsv(provider_sv);
+        data_provider.source.ptr = provider;
+        data_provider.read_callback = provider_read_callback;
+
+        rv = nghttp2_submit_response(
+            ps->session, stream_id, nva, nvlen, &data_provider);
+        if (nva) free(nva);
+        if (rv != 0) {
+            free_provider(aTHX_ provider);
+            croak("nghttp2_submit_response failed (%d): %s",
+                rv, nghttp2_strerror(rv));
+        }
+
+        add_provider(aTHX_ ps, provider);
+        RETVAL = rv;
     OUTPUT:
         RETVAL
 
@@ -1295,6 +1416,33 @@ _submit_response_streaming_native(self, stream_id, headers_av, provider_sv)
 
         add_provider(aTHX_ ps, provider);
         RETVAL = rv;
+    OUTPUT:
+        RETVAL
+
+int
+_submit_response_headers_uniform_native(self, stream_id, view_av, end_stream)
+        SV *self
+        int stream_id
+        AV *view_av
+        int end_stream
+    PREINIT:
+        unblock_h2_session *ps;
+        nghttp2_nv *nva;
+        size_t nvlen;
+        int32_t rv;
+        uint8_t flags;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        flags = end_stream ? NGHTTP2_FLAG_END_STREAM : NGHTTP2_FLAG_NONE;
+        rv = nghttp2_submit_headers(
+            ps->session, flags, stream_id, NULL, nva, nvlen, NULL);
+        if (nva) free(nva);
+        if (rv < 0) {
+            croak("nghttp2_submit_headers failed (%d): %s",
+                (int)rv, nghttp2_strerror((int)rv));
+        }
+        RETVAL = (int)rv;
     OUTPUT:
         RETVAL
 
