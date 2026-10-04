@@ -221,6 +221,59 @@ Unblock keeps connection-level receive credit moving independently, so one slow
 stream can exhaust its own receive window without unnecessarily stalling other
 streams on the same HTTP/2 connection. No timer or transport policy is involved.
 
+## SETTINGS
+
+Both Client and Server expose HTTP/2 SETTINGS without exposing the private
+nghttp2 session.
+
+Initial settings can be supplied at construction:
+
+    my $server = Unblock::HTTP2::Server->new(
+        settings => {
+            initial_window_size => 262_144,
+            max_frame_size      => 32_768,
+        },
+
+        on_settings => sub {
+            my ($engine, $peer, $changed) = @_;
+            # $peer is the current effective peer SETTINGS snapshot.
+            # $changed contains values from this SETTINGS frame.
+        },
+
+        on_settings_ack => sub {
+            my ($engine, $acked) = @_;
+            # $acked contains the values from our acknowledged SETTINGS frame.
+        },
+    );
+
+The public setting names are:
+
+    header_table_size
+    enable_push
+    max_concurrent_streams
+    initial_window_size
+    max_frame_size
+    max_header_list_size
+    enable_connect_protocol
+
+Read the values currently advertised by this endpoint with local_settings() or
+local_setting($name). Read the peer's effective values with peer_settings() or
+peer_setting($name). Returned hashes are copies.
+
+A connection can send later SETTINGS at any time:
+
+    $engine->update_settings(
+        initial_window_size => 131_072,
+    );
+
+settings_pending() reports how many locally submitted SETTINGS frames are still
+waiting for ACK. Unblock validates the HTTP/2 value ranges and keeps the
+SETTINGS_ENABLE_CONNECT_PROTOCOL transition one-way: once 1 has been sent it
+cannot later be reset to 0.
+
+The client keeps SETTINGS_ENABLE_PUSH at 0 because server push is not part of
+the public Unblock API.
+
 ## Graceful draining
 
 Both client and server engines can begin a graceful HTTP/2 shutdown with:
