@@ -4,6 +4,7 @@ use strict;
 use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed);
+use utf8 ();
 
 our $VERSION = '0.001';
 
@@ -17,6 +18,7 @@ sub _initialize_connection {
     $self->{streams}         = {};
     $self->{closed}          = 0;
     $self->{in_session_call} = 0;
+    $self->{close_pending}   = undef;
     $self->{pending_drain}   = {};
     return $self;
 }
@@ -68,6 +70,11 @@ sub input {
     croak 'input(): nghttp2 did not consume complete input'
         unless defined($consumed) && $consumed == length($bytes);
 
+    if (defined $self->{close_pending}) {
+        $self->_finish_close(delete $self->{close_pending});
+        return $consumed;
+    }
+
     $self->_after_session_call;
     return $consumed;
 }
@@ -85,6 +92,11 @@ sub output {
     {
         local $self->{in_session_call} = 1;
         $bytes = $self->{session}->mem_send;
+    }
+
+    if (defined $self->{close_pending}) {
+        $self->_finish_close(delete $self->{close_pending});
+        return defined($bytes) ? $bytes : '';
     }
 
     $self->_after_session_call;
@@ -130,12 +142,39 @@ sub _after_session_call {
     return;
 }
 
+sub _body_bytes {
+    my ($self, $operation, $bytes) = @_;
+
+    croak "$operation: body must be a scalar" if ref($bytes);
+    $bytes = '' unless defined $bytes;
+
+    my $copy = "$bytes";
+    if (utf8::is_utf8($copy)) {
+        croak "$operation: body must be a byte string"
+            unless utf8::downgrade($copy, 1);
+    }
+
+    return $copy;
+}
+
 sub close {
     my ($self, $error) = @_;
     return $self if $self->{closed};
 
     $error = 'HTTP/2 connection closed'
         unless defined($error) && length($error);
+
+    if ($self->{in_session_call}) {
+        $self->{close_pending} = "$error";
+        return $self;
+    }
+
+    return $self->_finish_close($error);
+}
+
+sub _finish_close {
+    my ($self, $error) = @_;
+    return $self if $self->{closed};
 
     $self->{closed} = 1;
 
