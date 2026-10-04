@@ -5,8 +5,8 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed);
 
-use Uniform::HTTP::Request 0.03;
-use Uniform::HTTP::Response 0.03;
+use Uniform::HTTP::Request 0.04;
+use Uniform::HTTP::Response 0.04;
 
 our $VERSION = '0.001';
 
@@ -95,6 +95,7 @@ sub request_from_headers {
             ':scheme'    => 1,
             ':authority' => 1,
             ':path'      => 1,
+            ':protocol'  => 1,
         },
     );
 
@@ -102,19 +103,38 @@ sub request_from_headers {
     croak 'request_from_headers(): missing :method'
         unless defined($method) && length($method);
 
-    my ($target, $scheme, $authority);
+    my ($target, $scheme, $authority, $protocol);
 
     if (uc($method) eq 'CONNECT') {
         croak 'request_from_headers(): CONNECT requires :authority'
             unless defined($pseudo->{':authority'})
                 && length($pseudo->{':authority'});
-        croak 'request_from_headers(): ordinary CONNECT must omit :scheme and :path'
-            if exists($pseudo->{':scheme'}) || exists($pseudo->{':path'});
 
         $authority = $pseudo->{':authority'};
-        $target = $authority;
+
+        if (exists $pseudo->{':protocol'}) {
+            $protocol = $pseudo->{':protocol'};
+            croak 'request_from_headers(): extended CONNECT requires nonempty :protocol'
+                unless defined($protocol) && length($protocol);
+            croak 'request_from_headers(): extended CONNECT requires :scheme'
+                unless defined($pseudo->{':scheme'})
+                    && length($pseudo->{':scheme'});
+            croak 'request_from_headers(): extended CONNECT requires :path'
+                unless defined($pseudo->{':path'})
+                    && length($pseudo->{':path'});
+
+            $scheme = $pseudo->{':scheme'};
+            $target = $pseudo->{':path'};
+        }
+        else {
+            croak 'request_from_headers(): ordinary CONNECT must omit :scheme and :path'
+                if exists($pseudo->{':scheme'}) || exists($pseudo->{':path'});
+            $target = $authority;
+        }
     }
     else {
+        croak 'request_from_headers(): :protocol requires CONNECT'
+            if exists $pseudo->{':protocol'};
         croak 'request_from_headers(): missing :scheme'
             unless defined($pseudo->{':scheme'})
                 && length($pseudo->{':scheme'});
@@ -136,11 +156,17 @@ sub request_from_headers {
         version   => '2',
         defined($scheme) ? (scheme => $scheme) : (),
         authority => $authority,
+        defined($protocol) ? (protocol => $protocol) : (),
         headers   => $normal,
     );
 
-    $request->mark_incomplete unless $end_stream;
-    $request->commit;
+    if ($end_stream) {
+        $request->mark_complete->freeze;
+    }
+    else {
+        $request->mark_incomplete->freeze_initial;
+    }
+
     return $request;
 }
 
@@ -168,9 +194,36 @@ sub response_from_headers {
         headers => $normal,
     );
 
-    $response->mark_incomplete unless $end_stream;
-    $response->commit;
+    if ($end_stream) {
+        $response->mark_complete->freeze;
+    }
+    else {
+        $response->mark_incomplete->freeze_initial;
+    }
+
     return $response;
+}
+
+sub apply_trailers {
+    my ($class, $message, $pairs) = @_;
+
+    croak 'apply_trailers(): requires a canonical Uniform HTTP message'
+        unless blessed($message)
+            && $message->can('add_trailer')
+            && $message->can('freeze_trailers');
+
+    my ($pseudo, $normal) = _split_header_block(
+        'apply_trailers()',
+        $pairs,
+        {},
+    );
+
+    for my $field (@$normal) {
+        $message->add_trailer(@$field);
+    }
+
+    $message->freeze_trailers;
+    return $message;
 }
 
 sub _request_contract {
@@ -178,9 +231,9 @@ sub _request_contract {
     return unless blessed($request);
 
     for my $method (qw(
-        method target scheme authority version
+        method target scheme authority protocol version
         header_count header_name header_value
-        is_mutable commit mark_incomplete mark_complete
+        trailer_count trailer_name trailer_value
         has_buffered_body body
     )) {
         return unless $request->can($method);
@@ -194,14 +247,23 @@ sub _response_contract {
     return unless blessed($response);
 
     for my $method (qw(
-        status version header_count header_name header_value
-        is_mutable commit mark_incomplete mark_complete
+        status version
+        header_count header_name header_value
+        trailer_count trailer_name trailer_value
         has_buffered_body body
     )) {
         return unless $response->can($method);
     }
 
     return 1;
+}
+
+sub _check_version {
+    my ($operation, $message) = @_;
+    my $version = $message->version;
+    croak "$operation: explicit HTTP version must be 2"
+        if defined($version) && $version ne '2';
+    return;
 }
 
 sub normal_fields {
@@ -217,23 +279,64 @@ sub normal_fields {
     return \@fields;
 }
 
+sub trailer_fields {
+    my ($class, $operation, $message) = @_;
+
+    my $count = $message->trailer_count;
+    croak "$operation: trailer section is unavailable"
+        unless defined $count;
+
+    my @fields;
+    for my $index (0 .. $count - 1) {
+        my $name = lc $message->trailer_name($index);
+        my $value = $message->trailer_value($index);
+        push @fields, _normal_field($operation, $name, $value);
+    }
+
+    return \@fields;
+}
+
 sub request_headers {
     my ($class, $request) = @_;
 
     croak 'request_headers(): requires the Uniform HTTP request contract'
         unless _request_contract($request);
-    croak 'request_headers(): Request version must be 2'
-        unless defined($request->version) && $request->version eq '2';
+    _check_version('request_headers()', $request);
 
-    my @block = ([ ':method', $request->method ]);
+    my $method = $request->method;
+    my $protocol = $request->protocol;
+    my @block = ([ ':method', $method ]);
 
-    if (uc($request->method) eq 'CONNECT') {
+    if (uc($method) eq 'CONNECT') {
         my $authority = $request->authority;
         croak 'request_headers(): CONNECT requires authority'
             unless defined($authority) && length($authority);
-        push @block, [ ':authority', $authority ];
+
+        if (defined $protocol) {
+            my $scheme = $request->scheme;
+            croak 'request_headers(): extended CONNECT requires scheme'
+                unless defined($scheme) && length($scheme);
+            croak 'request_headers(): extended CONNECT requires a path target'
+                unless defined($request->target) && length($request->target);
+
+            push @block,
+                [ ':protocol', $protocol ],
+                [ ':scheme', $scheme ],
+                [ ':authority', $authority ],
+                [ ':path', $request->target ];
+        }
+        else {
+            croak 'request_headers(): ordinary CONNECT target must equal authority'
+                unless $request->target eq $authority;
+            croak 'request_headers(): ordinary CONNECT must not have scheme'
+                if defined $request->scheme;
+            push @block, [ ':authority', $authority ];
+        }
     }
     else {
+        croak 'request_headers(): protocol metadata requires CONNECT'
+            if defined $protocol;
+
         my $scheme = $request->scheme;
         my $authority = $request->authority;
 
@@ -257,8 +360,7 @@ sub response_headers {
 
     croak 'response_headers(): requires the Uniform HTTP response contract'
         unless _response_contract($response);
-    croak 'response_headers(): Response version must be 2'
-        unless defined($response->version) && $response->version eq '2';
+    _check_version('response_headers()', $response);
 
     my @block = ([ ':status', '' . $response->status ]);
     push @block, @{ $class->normal_fields('response_headers()', $response) };
