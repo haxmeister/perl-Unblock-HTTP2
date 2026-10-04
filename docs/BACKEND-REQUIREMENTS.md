@@ -31,7 +31,7 @@ The private binding exposes only the pieces Unblock needs:
 - generic HEADERS submission
 - deferred DATA providers and resume
 - trailers
-- RST_STREAM
+- RST_STREAM submission and received error-code details
 - PING submission and received opaque-data details
 - GOAWAY submission and received GOAWAY details
 - stream half-close queries
@@ -76,6 +76,16 @@ Generic non-final HEADERS submission is available through the private binding.
 The public server API is Stream->inform($response). It accepts a Uniform
 informational Response and leaves the stream available for later informational
 responses and the final Stream->respond($response).
+
+## Stream resets
+
+nghttp2's stream-close callback includes the HTTP/2 error code used to close a
+stream. The Perl layer must preserve that code rather than flattening every
+RST_STREAM into a generic string.
+
+Explicit local reset uses nghttp2_submit_rst_stream with the caller's validated
+32-bit error code. CANCEL remains only a convenience default; the private
+binding does not choose retry semantics.
 
 ## Extensible priorities
 
