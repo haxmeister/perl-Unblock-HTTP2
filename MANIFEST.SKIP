@@ -1,9 +1,12 @@
-^\.git/
-^\.github/
-^_uniform_http/
-^blib/
+^\.git(?:/|$)
+^\.github(?:/|$)
+^\.gitignore$
+^_uniform_http(?:/|$)
+^blib(?:/|$)
+^_build(?:/|$)
 ^Makefile$
-^MYMETA\.
+^Makefile\.old$
+^MYMETA\.(?:json|yml)$
 ^pm_to_blib$
 ^Unblock-HTTP2-
 ^nghttp2\.c$

@@ -9,6 +9,8 @@ my $nghttp2_cflags = Alien::nghttp2->cflags;
 my $nghttp2_libs   = Alien::nghttp2->libs;
 my $nghttp2_define = $^O eq 'MSWin32' ? ' -DNGHTTP2_STATICLIB' : '';
 
+my $dist_version = MM->parse_version('lib/Unblock/HTTP2.pm');
+
 my @public_modules = qw(
     Unblock::HTTP2
     Unblock::HTTP2::Client
@@ -21,14 +23,14 @@ my %provides = map {
     $file =~ s{::}{/}g;
     $_ => {
         file    => $file,
-        version => '0.001',
+        version => $dist_version,
     };
 } @public_modules;
 
 WriteMakefile(
     NAME             => 'Unblock::HTTP2',
     VERSION_FROM     => 'lib/Unblock/HTTP2.pm',
-    ABSTRACT         => 'Event-loop and operating-system neutral HTTP/2 engine',
+    ABSTRACT_FROM    => 'lib/Unblock/HTTP2.pm',
     AUTHOR           => 'Joshua S. Day <hax@cpan.org>',
     LICENSE          => 'mit',
     MIN_PERL_VERSION => '5.016',
@@ -41,9 +43,12 @@ WriteMakefile(
     PREREQ_PM => {
         'Carp'          => 0,
         'Scalar::Util'  => 0,
-        'Test::More'    => 0,
         'Uniform::HTTP' => '0.04',
         'XSLoader'      => 0,
+    },
+
+    TEST_REQUIRES => {
+        'Test::More' => 0,
     },
 
     XS      => { 'nghttp2.xs' => 'nghttp2.c' },
@@ -55,6 +60,7 @@ WriteMakefile(
         'meta-spec' => { version => 2 },
         provides    => \%provides,
         resources   => {
+            homepage => 'https://github.com/haxmeister/perl-Unblock-HTTP2',
             repository => {
                 type => 'git',
                 url  => 'https://github.com/haxmeister/perl-Unblock-HTTP2.git',
