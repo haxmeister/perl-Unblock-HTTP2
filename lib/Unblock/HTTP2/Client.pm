@@ -158,9 +158,9 @@ sub request {
     croak 'request(): connection is closed' if $self->is_closed;
     croak 'request(): connection cannot accept another transaction'
         unless $self->can_open_transaction;
-    my $fast_view = Unblock::HTTP2::_Headers->fast_view($request);
+    my $native_message = Unblock::HTTP2::_Headers->native_message($request);
     croak 'request(): requires the Uniform HTTP request contract'
-        unless $fast_view
+        unless $native_message
             || Unblock::HTTP2::_Headers::_request_contract($request);
 
     if (defined($request->protocol) && length($request->protocol)) {
@@ -195,7 +195,7 @@ sub request {
     croak 'request(): stream_body cannot be combined with a buffered body'
         if $stream_body && $request->has_buffered_body;
 
-    my $block = $fast_view
+    my $block = $native_message
         ? undef
         : Unblock::HTTP2::_Headers->request_headers($request);
     my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
@@ -233,8 +233,8 @@ sub request {
         $body = $request->body;
     }
 
-    my $stream_id = $fast_view
-        ? $self->{session}->_submit_request_uniform_xs($fast_view, $body)
+    my $stream_id = $native_message
+        ? $self->{session}->_submit_request_uniform_xs($native_message, $body)
         : $self->{session}->_submit_request_xs($block, $body);
 
     my $transaction = Unblock::HTTP2::Transaction->_new(
