@@ -1,0 +1,10 @@
+Revision history for Unblock-HTTP2
+
+0.001  Not yet released
+    - Start standalone event-loop and operating-system neutral HTTP/2 engine.
+    - Use Uniform::HTTP Request and Response objects directly.
+    - Add byte-in/byte-out Client and Server engines with no socket ownership.
+    - Add multiplexed Stream objects, streaming request/response bodies,
+      cooperative backpressure, cancellation, GOAWAY drain state, and decoded
+      header-list limits.
+    - Add in-memory client/server protocol tests with no socket or event loop.
