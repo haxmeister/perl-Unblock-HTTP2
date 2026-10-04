@@ -10,6 +10,27 @@
 #include <string.h>
 
 typedef struct unblock_h2_provider unblock_h2_provider;
+typedef struct unblock_h2_header_block unblock_h2_header_block;
+
+typedef struct {
+    char *name;
+    size_t namelen;
+    char *value;
+    size_t valuelen;
+} unblock_h2_header_field;
+
+struct unblock_h2_header_block {
+    unblock_h2_header_block *next;
+    int32_t stream_id;
+    int category;
+    uint8_t flags;
+    size_t list_size;
+    size_t count;
+    size_t capacity;
+    unblock_h2_header_field *fields;
+    const char *error;
+    uint32_t error_code;
+};
 
 struct unblock_h2_provider {
     unblock_h2_provider *next;
@@ -33,6 +54,9 @@ typedef struct {
     SV *callback_error;
     unblock_h2_provider *providers;
     unblock_h2_provider *pending_free;
+    unblock_h2_header_block *header_blocks;
+    size_t max_header_list_size;
+    int server;
     int in_session_call;
 } unblock_h2_session;
 
@@ -220,6 +244,165 @@ add_provider(pTHX_ unblock_h2_session *ps, unblock_h2_provider *provider)
 
     provider->next = ps->providers;
     ps->providers = provider;
+}
+
+static void
+free_header_block(unblock_h2_header_block *block)
+{
+    size_t i;
+
+    if (!block) {
+        return;
+    }
+
+    for (i = 0; i < block->count; i++) {
+        free(block->fields[i].name);
+        free(block->fields[i].value);
+    }
+    free(block->fields);
+    free(block);
+}
+
+static unblock_h2_header_block *
+find_header_block(unblock_h2_session *ps, int32_t stream_id)
+{
+    unblock_h2_header_block *block = ps->header_blocks;
+
+    while (block) {
+        if (block->stream_id == stream_id) {
+            return block;
+        }
+        block = block->next;
+    }
+    return NULL;
+}
+
+static unblock_h2_header_block *
+take_header_block(unblock_h2_session *ps, int32_t stream_id)
+{
+    unblock_h2_header_block **link = &ps->header_blocks;
+
+    while (*link) {
+        unblock_h2_header_block *block = *link;
+        if (block->stream_id == stream_id) {
+            *link = block->next;
+            block->next = NULL;
+            return block;
+        }
+        link = &block->next;
+    }
+    return NULL;
+}
+
+static void
+remove_header_block(unblock_h2_session *ps, int32_t stream_id)
+{
+    free_header_block(take_header_block(ps, stream_id));
+}
+
+static void
+free_header_blocks(unblock_h2_session *ps)
+{
+    unblock_h2_header_block *block = ps->header_blocks;
+
+    ps->header_blocks = NULL;
+    while (block) {
+        unblock_h2_header_block *next = block->next;
+        free_header_block(block);
+        block = next;
+    }
+}
+
+static int
+start_header_block(unblock_h2_session *ps, const nghttp2_frame *frame)
+{
+    unblock_h2_header_block *block;
+
+    remove_header_block(ps, frame->hd.stream_id);
+
+    block = (unblock_h2_header_block *)calloc(1, sizeof(*block));
+    if (!block) {
+        return 0;
+    }
+
+    block->stream_id = frame->hd.stream_id;
+    block->category = frame->headers.cat;
+    block->flags = frame->hd.flags;
+    block->next = ps->header_blocks;
+    ps->header_blocks = block;
+    return 1;
+}
+
+static int
+append_header_field(unblock_h2_session *ps,
+                    unblock_h2_header_block *block,
+                    const uint8_t *name, size_t namelen,
+                    const uint8_t *value, size_t valuelen)
+{
+    unblock_h2_header_field *fields;
+    unblock_h2_header_field *field;
+    size_t new_size;
+    size_t capacity;
+
+    if (!block || block->error) {
+        return 1;
+    }
+
+    if (namelen > (size_t)-1 - valuelen - 32
+        || block->list_size > (size_t)-1 - namelen - valuelen - 32) {
+        block->error = "HTTP/2 header list size overflow";
+        block->error_code = NGHTTP2_ENHANCE_YOUR_CALM;
+        return 1;
+    }
+
+    new_size = block->list_size + namelen + valuelen + 32;
+    if (new_size > ps->max_header_list_size) {
+        block->error = ps->server
+            ? "HTTP/2 request header list exceeds configured limit"
+            : "HTTP/2 response header list exceeds configured limit";
+        block->error_code = NGHTTP2_ENHANCE_YOUR_CALM;
+        return 1;
+    }
+
+    if (block->count == block->capacity) {
+        capacity = block->capacity ? block->capacity * 2 : 8;
+        if (capacity < block->capacity
+            || capacity > (size_t)-1 / sizeof(*fields)) {
+            return 0;
+        }
+        fields = (unblock_h2_header_field *)realloc(
+            block->fields, capacity * sizeof(*fields));
+        if (!fields) {
+            return 0;
+        }
+        memset(fields + block->capacity, 0,
+            (capacity - block->capacity) * sizeof(*fields));
+        block->fields = fields;
+        block->capacity = capacity;
+    }
+
+    field = &block->fields[block->count];
+    field->name = (char *)malloc(namelen ? namelen : 1);
+    field->value = (char *)malloc(valuelen ? valuelen : 1);
+    if (!field->name || !field->value) {
+        free(field->name);
+        free(field->value);
+        field->name = NULL;
+        field->value = NULL;
+        return 0;
+    }
+
+    if (namelen) {
+        memcpy(field->name, name, namelen);
+    }
+    if (valuelen) {
+        memcpy(field->value, value, valuelen);
+    }
+    field->namelen = namelen;
+    field->valuelen = valuelen;
+    block->count++;
+    block->list_size = new_size;
+    return 1;
 }
 
 static nghttp2_nv *
