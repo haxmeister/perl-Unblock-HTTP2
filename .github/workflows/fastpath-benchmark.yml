@@ -2,6 +2,9 @@ name: fastpath-benchmark
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/uniform-http-006-native-path
 
 jobs:
   benchmark:
