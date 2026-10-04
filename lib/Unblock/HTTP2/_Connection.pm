@@ -119,6 +119,17 @@ sub _queue_drain {
     return;
 }
 
+sub _consume_stream_body {
+    my ($self, $stream, $bytes) = @_;
+
+    croak 'consume(): connection is closed'
+        if $self->{closed} || !$self->{session};
+    return unless $bytes;
+
+    $self->{session}->consume_stream($stream->id, $bytes);
+    return;
+}
+
 sub _after_session_call {
     my ($self) = @_;
 

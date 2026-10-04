@@ -32,6 +32,8 @@ The private binding exposes only the pieces Unblock needs:
 - RST_STREAM
 - GOAWAY submission and received GOAWAY details
 - stream half-close queries
+- disabled automatic receive WINDOW_UPDATE
+- independent connection and stream consumption credit
 
 Uniform::HTTP message construction and validation remain in Perl.
 
@@ -44,6 +46,22 @@ Extended CONNECT and to combine the local active-stream cap with the peer's
 SETTINGS_MAX_CONCURRENT_STREAMS.
 
 Unblock does not parse SETTINGS frames independently.
+
+## Receive flow control
+
+Sessions are created with nghttp2_option_set_no_auto_window_update enabled.
+
+For every received DATA chunk the private binding releases connection-level
+credit with nghttp2_session_consume_connection. Stream-level credit is kept
+separate and released with nghttp2_session_consume_stream only when the public
+Stream consumption policy allows it.
+
+This split is deliberate. It permits one application-stalled stream to stop its
+own WINDOW_UPDATE progress without exhausting the shared connection window and
+stalling unrelated streams.
+
+Unblock does not use nghttp2_submit_window_update as a substitute for
+application-consumption accounting.
 
 ## Informational responses
 

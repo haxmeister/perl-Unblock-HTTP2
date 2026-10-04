@@ -22,6 +22,8 @@ Revision history for Unblock-HTTP2
       concurrency enforcement.
     - Add Stream->inform() for one or more non-final informational Responses.
     - Preserve received GOAWAY last-stream-id, error code, and debug data.
+    - Add application-driven receive flow control with per-stream consume()
+      credit while keeping connection-level credit independent.
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.

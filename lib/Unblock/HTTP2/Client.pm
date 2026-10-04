@@ -464,10 +464,15 @@ sub _on_data_chunk_recv {
         return 0;
     }
 
-    my $result = $stream->_invoke('on_body', $response, $data);
-    $self->_stream_failure($stream_id, "$result")
-        unless $result eq '1';
+    $stream->_receive_body_bytes(length $data);
 
+    my $result = $stream->_invoke('on_body', $response, $data);
+    if ($result ne '1') {
+        $self->_stream_failure($stream_id, "$result");
+        return 0;
+    }
+
+    $stream->_auto_consume_body;
     return 0;
 }
 

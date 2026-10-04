@@ -298,13 +298,18 @@ sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $stream = $self->stream_for_id($stream_id) or return 0;
 
+    $stream->_receive_body_bytes(length $data);
+
     my $result = $self->_invoke_callback(
         'on_body', $stream, $stream->request, $data,
     );
 
-    $self->_stream_failure($stream_id, "$result")
-        unless $result eq '1';
+    if ($result ne '1') {
+        $self->_stream_failure($stream_id, "$result");
+        return 0;
+    }
 
+    $stream->_auto_consume_body;
     return 0;
 }
 
