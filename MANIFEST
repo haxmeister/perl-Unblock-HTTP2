@@ -39,4 +39,5 @@ t/37-reset-codes.t
 t/38-protocol-errors.t
 t/39-goaway-control.t
 t/40-fatal-session-errors.t
+t/41-uniform-fastpath.t
 t/lib/Test/UnblockHTTP2.pm
