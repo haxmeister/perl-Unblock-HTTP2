@@ -126,7 +126,23 @@ sub transfer {
             ? ($from->session->want_write ? 1 : 0)
             : 0;
 
+        my $wire = $bytes;
+        $wire =~ s/^PRI \* HTTP\/2\.0\r\n\r\nSM\r\n\r\n//;
+        my @frames;
+        while (length($wire) >= 9) {
+            my $length = (ord(substr($wire, 0, 1)) << 16)
+                | (ord(substr($wire, 1, 1)) << 8)
+                | ord(substr($wire, 2, 1));
+            last if length($wire) < 9 + $length;
+            my $type = ord(substr($wire, 3, 1));
+            my $flags = ord(substr($wire, 4, 1));
+            my $sid = unpack('N', substr($wire, 5, 4)) & 0x7fffffff;
+            push @frames, "$type/$flags/$sid/$length";
+            substr($wire, 0, 9 + $length, '');
+        }
+
         diag "$name round=$round pass=$pass bytes=" . length($bytes)
+            . " frames=[" . join(',', @frames) . "]"
             . " engine_want=" . ($from->want_write ? 1 : 0)
             . " backend_before=$backend_before"
             . " backend_after=$backend_after";
@@ -148,7 +164,12 @@ for my $round (1 .. 1000) {
     if (!$moved) {
         diag "stall client backend want_read="
             . ($client->session->want_read ? 1 : 0)
-            . " want_write=" . ($client->session->want_write ? 1 : 0);
+            . " want_write=" . ($client->session->want_write ? 1 : 0)
+            . " deferred=" . ($client->session->is_stream_deferred($stream->id) ? 1 : 0)
+            . " local_close=" . (defined($client->session->get_stream_local_close($stream->id))
+                ? $client->session->get_stream_local_close($stream->id) : 'undef')
+            . " remote_close=" . (defined($client->session->get_stream_remote_close($stream->id))
+                ? $client->session->get_stream_remote_close($stream->id) : 'undef');
         diag "stall server backend want_read="
             . ($server->session->want_read ? 1 : 0)
             . " want_write=" . ($server->session->want_write ? 1 : 0);
