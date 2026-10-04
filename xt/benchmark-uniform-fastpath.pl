@@ -12,6 +12,7 @@ use Unblock::HTTP2::Client;
 use Unblock::HTTP2::Server;
 
 my $label = $ENV{BENCH_LABEL} || 'unknown';
+my $expected_path = $ENV{BENCH_EXPECT_PATH} || '';
 my $submit_iterations = $ENV{BENCH_SUBMIT_ITERATIONS} || 20_000;
 my $loopback_iterations = $ENV{BENCH_LOOPBACK_ITERATIONS} || 8_000;
 my $warmup_iterations = $ENV{BENCH_WARMUP_ITERATIONS} || 750;
@@ -41,6 +42,15 @@ sub submit_batch {
     $session->mem_send;
 
     my $native_fast = $session->can('_submit_request_uniform_xs') ? 1 : 0;
+
+    if ($expected_path eq 'fastpath' && !$native_fast) {
+        die "expected FastPath implementation but portable module was loaded from "
+            . ($INC{'Unblock/HTTP2/_nghttp2.pm'} || 'unknown path');
+    }
+    if ($expected_path eq 'portable' && $native_fast) {
+        die "expected portable baseline but FastPath module was loaded from "
+            . ($INC{'Unblock/HTTP2/_nghttp2.pm'} || 'unknown path');
+    }
 
     for my $index (1 .. $iterations) {
         if ($native_fast) {
@@ -166,6 +176,10 @@ my $loopback_start = time;
 exchange_count($loopback_iterations);
 my $loopback_seconds = time - $loopback_start;
 my $loopback_rate = $loopback_iterations / $loopback_seconds;
+
+printf "INFO label=%s module=%s\n",
+    $label,
+    $INC{'Unblock/HTTP2/_nghttp2.pm'} || 'unknown';
 
 printf "RESULT label=%s path=%s mode=submit iterations=%d seconds=%.6f rate=%.3f\n",
     $label,
