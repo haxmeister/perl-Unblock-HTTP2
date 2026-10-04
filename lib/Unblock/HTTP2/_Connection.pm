@@ -76,7 +76,7 @@ sub close_reason {
 }
 
 sub transaction_count {
-    return scalar keys %{ $_[0]{streams} };
+    return scalar keys %{ $_[0]{transactions} };
 }
 
 sub transaction_for_stream_id {
