@@ -1292,6 +1292,23 @@ trailers_from_native_headers(pTHX_ const unblock_h2_header_block *block,
     return headers;
 }
 
+static int
+header_block_has_name(const unblock_h2_header_block *block,
+                      const char *name)
+{
+    size_t i;
+
+    for (i = 0; i < block->count; i++) {
+        if (bytes_equal(
+                block->fields[i].name,
+                block->fields[i].namelen,
+                name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static void
 attach_native_header_result(pTHX_ unblock_h2_session *ps,
                             const nghttp2_frame *frame, HV *hv,
@@ -1337,8 +1354,14 @@ attach_native_header_result(pTHX_ unblock_h2_session *ps,
             break;
 
         case NGHTTP2_HCAT_HEADERS:
-            headers = trailers_from_native_headers(
-                aTHX_ block, &error);
+            if (!ps->server && header_block_has_name(block, ":status")) {
+                message = response_from_native_headers(
+                    aTHX_ ps, block, &error);
+            }
+            else {
+                headers = trailers_from_native_headers(
+                    aTHX_ block, &error);
+            }
             break;
 
         default:
