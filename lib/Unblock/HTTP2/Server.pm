@@ -65,11 +65,9 @@ sub new {
     croak 'new(): unknown options: ' . join(', ', sort keys %option)
         if %option;
 
-    require Net::HTTP2::nghttp2;
-    Net::HTTP2::nghttp2->VERSION('0.011');
-    require Net::HTTP2::nghttp2::Session;
+    require Unblock::HTTP2::_nghttp2;
     croak 'new(): nghttp2 library is unavailable'
-        unless Net::HTTP2::nghttp2->available;
+        unless Unblock::HTTP2::_nghttp2->available;
 
     my $self = bless {
         callbacks               => \%callbacks,
@@ -80,12 +78,13 @@ sub new {
         last_peer_stream_id     => 0,
         receive                 => {},
         providers               => {},
+        peer_goaway              => undef,
     }, $class;
 
     my $weak = $self;
     weaken($weak);
 
-    my $session = Net::HTTP2::nghttp2::Session->new_server(
+    my $session = Unblock::HTTP2::_nghttp2::Session->new_server(
         callbacks => {
             on_begin_headers => sub {
                 my $self = $weak or return 0;
@@ -126,6 +125,12 @@ sub new {
 }
 sub draining {
     return $_[0]{draining} ? 1 : 0;
+}
+
+sub peer_goaway {
+    my ($self) = @_;
+    return unless $self->{peer_goaway};
+    return { %{ $self->{peer_goaway} } };
 }
 
 sub drain {
@@ -202,6 +207,13 @@ sub _on_frame_recv {
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
+        $self->{peer_goaway} = {
+            last_stream_id => 0 + ($frame->{last_stream_id} // 0),
+            error_code     => 0 + ($frame->{error_code} // 0),
+            debug_data     => defined($frame->{debug_data})
+                ? "$frame->{debug_data}"
+                : '',
+        };
         return 0;
     }
 
@@ -328,6 +340,37 @@ sub _on_session_error {
     my $callback = $self->{callbacks}{on_error} or return 0;
     eval { $callback->(undef, "$message") };
     return 0;
+}
+
+sub _inform_stream {
+    my ($self, $stream, $response) = @_;
+
+    croak 'inform(): requires the Uniform HTTP response contract'
+        unless Unblock::HTTP2::_Headers::_response_contract($response);
+    croak 'inform(): final Response already submitted'
+        if $stream->response;
+
+    my $status = $response->status;
+    croak 'inform(): status must be informational (100-199, excluding 101)'
+        unless defined($status) && !ref($status)
+            && $status =~ /\A[0-9]+\z/
+            && $status >= 100 && $status < 200 && $status != 101;
+    croak 'inform(): informational Response must not have a buffered body'
+        if $response->has_buffered_body;
+
+    my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
+        'inform()', $response,
+    );
+    croak 'inform(): informational Response must not have trailers'
+        if @$trailers;
+
+    my $block = Unblock::HTTP2::_Headers->response_headers($response);
+    $self->{session}->submit_headers(
+        $stream->id,
+        headers => $block,
+    );
+
+    return $stream;
 }
 
 sub _respond_stream {
