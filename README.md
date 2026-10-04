@@ -274,6 +274,41 @@ cannot later be reset to 0.
 The client keeps SETTINGS_ENABLE_PUSH at 0 because server push is not part of
 the public Unblock API.
 
+## Modern prioritization
+
+Unblock::HTTP2 uses the RFC 9218 extensible priority scheme rather than the
+deprecated RFC 7540 dependency tree.
+
+Client and Server advertise:
+
+    no_rfc7540_priorities => 1
+
+in their first SETTINGS frame by default. A caller can override that initial
+value with the normal settings constructor option.
+
+The HTTP Priority header remains an ordinary Uniform::HTTP header and can be
+placed on a Request without an HTTP/2-specific object:
+
+    headers => [
+        [ 'Priority', 'u=1, i' ],
+    ]
+
+After a request has been sent, a client can change its preference with the
+HTTP/2-specific PRIORITY_UPDATE frame:
+
+    $stream->update_priority('u=0, i');
+
+The server can observe hop-by-hop updates with:
+
+    on_priority => sub {
+        my ($server, $stream_id, $field_value) = @_;
+    }
+
+Unblock preserves the complete Priority field value instead of limiting the API
+to today's urgency and incremental parameters. nghttp2 owns parsing and
+scheduling. If the peer did not advertise RFC 9218 priority support,
+update_priority() is refused.
+
 ## PING
 
 Both endpoints can send an HTTP/2 PING with exactly eight opaque bytes:
