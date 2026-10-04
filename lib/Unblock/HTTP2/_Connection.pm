@@ -109,8 +109,13 @@ sub output {
     }
 
     $bytes = '' unless defined $bytes;
-    $self->{output_pending} =
-        length($bytes) && $self->{session}->want_write ? 1 : 0;
+
+    # One nghttp2 send pass can make additional output eligible only after the
+    # bytes from that pass have been serialized. Keep the engine writable after
+    # every non-empty result and clear readiness only when a later probe is
+    # empty. This avoids tying the portable host contract to backend scheduling
+    # details.
+    $self->{output_pending} = length($bytes) ? 1 : 0;
 
     $self->_after_session_call;
     return $bytes;
