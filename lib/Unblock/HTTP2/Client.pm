@@ -7,7 +7,7 @@ use Scalar::Util qw(weaken);
 use parent 'Unblock::HTTP2::_Connection';
 
 use Unblock::HTTP2::_Headers;
-use Unblock::HTTP2::Stream;
+use Unblock::HTTP2::Transaction;
 
 our $VERSION = '0.02';
 
@@ -141,7 +141,7 @@ sub drain {
     return $self->goaway(error_code => 0);
 }
 
-sub can_open_stream {
+sub can_open_transaction {
     my ($self) = @_;
     return 0 if $self->is_closed || $self->{draining};
 
@@ -149,15 +149,20 @@ sub can_open_stream {
     my $peer_limit = $self->peer_setting('max_concurrent_streams');
     $limit = $peer_limit if $peer_limit < $limit;
 
-    return $self->stream_count < $limit ? 1 : 0;
+    return $self->transaction_count < $limit ? 1 : 0;
+}
+
+sub can_open_stream {
+    my ($self) = @_;
+    return $self->can_open_transaction;
 }
 
 sub request {
     my ($self, $request, %option) = @_;
 
     croak 'request(): connection is closed' if $self->is_closed;
-    croak 'request(): connection cannot accept another stream'
-        unless $self->can_open_stream;
+    croak 'request(): connection cannot accept another transaction'
+        unless $self->can_open_transaction;
     my $fast_view = Unblock::HTTP2::_Headers->fast_view($request);
     croak 'request(): requires the Uniform HTTP request contract'
         unless $fast_view
@@ -237,7 +242,7 @@ sub request {
         ? $self->{session}->_submit_request_uniform_xs($fast_view, $body)
         : $self->{session}->_submit_request_xs($block, $body);
 
-    my $stream = Unblock::HTTP2::Stream->_new(
+    my $stream = Unblock::HTTP2::Transaction->_new(
         connection => $self,
         id         => $stream_id,
         request    => $request,
@@ -399,7 +404,7 @@ sub _on_frame_recv {
     my $state = $self->{receive}{$stream_id} or return 0;
     return 0 if $state->{header_limit_exceeded};
 
-    my $stream = $self->stream_for_id($stream_id) or return 0;
+    my $stream = $self->transaction_for_stream_id($stream_id) or return 0;
 
     if (($frame->{type} // -1) == H2_HEADERS) {
         if (!$state->{response}) {
@@ -489,7 +494,7 @@ sub _on_frame_recv {
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $state = $self->{receive}{$stream_id} or return 0;
-    my $stream = $self->stream_for_id($stream_id) or return 0;
+    my $stream = $self->transaction_for_stream_id($stream_id) or return 0;
     my $response = $state->{response};
 
     if (!$response) {
@@ -517,7 +522,7 @@ sub _finish_response {
     my $state = $self->{receive}{$stream_id} or return;
     return if $state->{response_done}++;
 
-    my $stream = $self->stream_for_id($stream_id) or return;
+    my $stream = $self->transaction_for_stream_id($stream_id) or return;
     my $response = $state->{response};
 
     if (!$response) {
@@ -571,7 +576,7 @@ sub _stream_failure {
     $error = 'HTTP/2 stream failure'
         unless defined($error) && length($error);
 
-    my $stream = $self->stream_for_id($stream_id) or return;
+    my $stream = $self->transaction_for_stream_id($stream_id) or return;
     return if $stream->is_terminal;
 
     $stream->_fail($error, $code, 0);
@@ -583,7 +588,7 @@ sub _stream_failure {
 sub _write_stream_body {
     my ($self, $stream, $bytes, $final, $operation) = @_;
 
-    my $provider = $self->{providers}{ $stream->id }
+    my $provider = $self->{providers}{ $stream->stream_id }
         or croak "$operation(): Stream has no streaming Request body";
 
     $bytes = $self->_body_bytes("$operation()", $bytes);
@@ -600,8 +605,8 @@ sub _write_stream_body {
         $provider->{eof} = 1;
     }
 
-    if ($self->{session}->is_stream_deferred($stream->id)) {
-        $self->{session}->resume_stream($stream->id);
+    if ($self->{session}->is_stream_deferred($stream->stream_id)) {
+        $self->{session}->resume_stream($stream->stream_id);
     }
 
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
@@ -690,7 +695,7 @@ C<on_ping_ack>, and C<on_invalid_frame>.
 =head1 REQUESTS
 
 C<request($request, %options)> sends a L<Uniform::HTTP::Request> and returns a
-L<Unblock::HTTP2::Stream>.
+L<Unblock::HTTP2::Transaction>.
 
 Useful callbacks are:
 
@@ -731,8 +736,8 @@ The Client also exposes the common connection methods:
 
     is_closed
     close_reason
-    stream_count
-    stream_for_id
+    transaction_count
+    transaction_for_stream_id
     local_settings
     local_setting
     peer_settings
@@ -756,7 +761,7 @@ opened.
 
 =head1 SEE ALSO
 
-L<Unblock::HTTP2>, L<Unblock::HTTP2::Stream>, L<Uniform::HTTP::Request>
+L<Unblock::HTTP2>, L<Unblock::HTTP2::Transaction>, L<Uniform::HTTP::Request>
 
 =head1 LICENSE
 

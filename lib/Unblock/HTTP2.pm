@@ -61,7 +61,7 @@ Unblock::HTTP2 - non-blocking HTTP/2 protocol engine for Perl
 
     my $client = Unblock::HTTP2::Client->new;
 
-    my $stream = $client->request(
+    my $transaction = $client->request(
         Uniform::HTTP::Request->new(
             method    => 'GET',
             target    => '/',
@@ -106,9 +106,13 @@ One client HTTP/2 connection.
 
 One server HTTP/2 connection.
 
+=item L<Unblock::HTTP2::Transaction>
+
+One HTTP request/response transaction carried by an HTTP/2 stream.
+
 =item L<Unblock::HTTP2::Stream>
 
-One multiplexed request/response stream.
+Compatibility name for C<Unblock::HTTP2::Transaction>.
 
 =back
 

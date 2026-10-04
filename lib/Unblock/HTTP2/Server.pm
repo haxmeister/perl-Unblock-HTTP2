@@ -7,7 +7,7 @@ use Scalar::Util qw(weaken);
 use parent 'Unblock::HTTP2::_Connection';
 
 use Unblock::HTTP2::_Headers;
-use Unblock::HTTP2::Stream;
+use Unblock::HTTP2::Transaction;
 
 our $VERSION = '0.02';
 
@@ -174,7 +174,7 @@ sub _on_begin_headers {
     $state->{header_list_size} = 0;
     $state->{header_limit_exceeded} = 0;
 
-    if ($self->stream_for_id($stream_id)) {
+    if ($self->transaction_for_stream_id($stream_id)) {
         $state->{trailer_block} = [];
         $state->{collecting} = 'trailer';
     }
@@ -239,7 +239,7 @@ sub _on_frame_recv {
     return 0 if $state->{header_limit_exceeded};
 
     if (($frame->{type} // -1) == H2_HEADERS) {
-        my $stream = $self->stream_for_id($stream_id);
+        my $stream = $self->transaction_for_stream_id($stream_id);
 
         if (!$stream) {
             my $request = eval {
@@ -255,7 +255,7 @@ sub _on_frame_recv {
                 return 0;
             }
 
-            $stream = Unblock::HTTP2::Stream->_new(
+            $stream = Unblock::HTTP2::Transaction->_new(
                 connection => $self,
                 id         => $stream_id,
                 request    => $request,
@@ -311,7 +311,7 @@ sub _on_frame_recv {
 }
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
-    my $stream = $self->stream_for_id($stream_id) or return 0;
+    my $stream = $self->transaction_for_stream_id($stream_id) or return 0;
 
     $stream->_receive_body_bytes(length $data);
 
@@ -333,7 +333,7 @@ sub _request_end {
     my $state = $self->{receive}{$stream_id} or return;
     return if $state->{request_end_called}++;
 
-    my $stream = $self->stream_for_id($stream_id) or return;
+    my $stream = $self->transaction_for_stream_id($stream_id) or return;
     $stream->request->mark_complete->freeze;
 
     my $result = $self->_invoke_callback(
@@ -393,14 +393,14 @@ sub _inform_stream {
 
     if ($fast_view) {
         $self->{session}->submit_response_headers_uniform(
-            $stream->id,
+            $stream->stream_id,
             $fast_view,
         );
     }
     else {
         my $block = Unblock::HTTP2::_Headers->response_headers($response);
         $self->{session}->submit_headers(
-            $stream->id,
+            $stream->stream_id,
             headers => $block,
         );
     }
@@ -455,7 +455,7 @@ sub _respond_stream {
             queue             => '',
             eof               => 0,
             blocked           => 0,
-            stream_id         => $stream->id,
+            stream_id         => $stream->stream_id,
             trailers          => undef,
             trailer_submitted => 0,
         };
@@ -478,14 +478,14 @@ sub _respond_stream {
 
         if ($fast_view) {
             $self->{session}->submit_response_uniform(
-                $stream->id,
+                $stream->stream_id,
                 $fast_view,
                 data_callback => $data_callback,
             );
         }
         else {
             $self->{session}->submit_response(
-                $stream->id,
+                $stream->stream_id,
                 status        => $response->status,
                 headers       => \@headers,
                 data_callback => $data_callback,
@@ -495,14 +495,14 @@ sub _respond_stream {
     elsif ($response->has_buffered_body) {
         if ($fast_view) {
             $self->{session}->submit_response_uniform(
-                $stream->id,
+                $stream->stream_id,
                 $fast_view,
                 body => $response->body,
             );
         }
         else {
             $self->{session}->submit_response(
-                $stream->id,
+                $stream->stream_id,
                 status  => $response->status,
                 headers => \@headers,
                 body    => $response->body,
@@ -512,13 +512,13 @@ sub _respond_stream {
     else {
         if ($fast_view) {
             $self->{session}->submit_response_uniform(
-                $stream->id,
+                $stream->stream_id,
                 $fast_view,
             );
         }
         else {
             $self->{session}->submit_response(
-                $stream->id,
+                $stream->stream_id,
                 status  => $response->status,
                 headers => \@headers,
             );
@@ -530,7 +530,7 @@ sub _respond_stream {
     $stream->_set_callback('on_error', $on_error) if $on_error;
 
     if ($provider) {
-        $self->{providers}{ $stream->id } = $provider;
+        $self->{providers}{ $stream->stream_id } = $provider;
     }
 
     return $stream;
@@ -588,7 +588,7 @@ sub _submit_provider_trailers {
 sub _write_stream_body {
     my ($self, $stream, $bytes, $final, $operation) = @_;
 
-    my $provider = $self->{providers}{ $stream->id }
+    my $provider = $self->{providers}{ $stream->stream_id }
         or croak "$operation(): Stream has no streaming Response body";
 
     $bytes = $self->_body_bytes("$operation()", $bytes);
@@ -605,8 +605,8 @@ sub _write_stream_body {
         $provider->{eof} = 1;
     }
 
-    if ($self->{session}->is_stream_deferred($stream->id)) {
-        $self->{session}->resume_stream($stream->id);
+    if ($self->{session}->is_stream_deferred($stream->stream_id)) {
+        $self->{session}->resume_stream($stream->stream_id);
     }
 
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
@@ -626,7 +626,7 @@ sub _stream_failure {
     $error = 'HTTP/2 stream failure'
         unless defined($error) && length($error);
 
-    my $stream = $self->stream_for_id($stream_id);
+    my $stream = $self->transaction_for_stream_id($stream_id);
 
     if ($stream && !$stream->is_terminal) {
         $stream->_fail($error, $code, 0);
@@ -739,7 +739,7 @@ C<on_body> receives body chunks.
 C<on_request_end> runs after the complete request and any trailers have
 arrived.
 
-The callback receives an L<Unblock::HTTP2::Stream>. Use C<inform()> for
+The callback receives an L<Unblock::HTTP2::Transaction>. Use C<inform()> for
 informational responses and C<respond()> for the final response.
 
 =head1 CONNECTION CONTROL
@@ -748,8 +748,8 @@ The Server exposes the common connection methods:
 
     is_closed
     close_reason
-    stream_count
-    stream_for_id
+    transaction_count
+    transaction_for_stream_id
     local_settings
     local_setting
     peer_settings
@@ -772,7 +772,7 @@ The server can also observe RFC 9218 priority updates with C<on_priority>.
 
 =head1 SEE ALSO
 
-L<Unblock::HTTP2>, L<Unblock::HTTP2::Stream>, L<Uniform::HTTP::Response>
+L<Unblock::HTTP2>, L<Unblock::HTTP2::Transaction>, L<Uniform::HTTP::Response>
 
 =head1 LICENSE
 

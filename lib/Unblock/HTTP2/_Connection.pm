@@ -75,13 +75,23 @@ sub close_reason {
     return $_[0]{close_reason};
 }
 
-sub stream_count {
+sub transaction_count {
     return scalar keys %{ $_[0]{streams} };
+}
+
+sub stream_count {
+    my ($self) = @_;
+    return $self->transaction_count;
+}
+
+sub transaction_for_stream_id {
+    my ($self, $stream_id) = @_;
+    return $self->{streams}{$stream_id};
 }
 
 sub stream_for_id {
     my ($self, $stream_id) = @_;
-    return $self->{streams}{$stream_id};
+    return $self->transaction_for_stream_id($stream_id);
 }
 
 sub want_read {
@@ -168,7 +178,7 @@ sub output {
 
 sub _register_stream {
     my ($self, $stream) = @_;
-    $self->{streams}{ $stream->id } = $stream;
+    $self->{streams}{ $stream->stream_id } = $stream;
     return $stream;
 }
 
@@ -194,7 +204,7 @@ sub _reset_stream {
             && "$error_code" =~ /\A[0-9]+\z/
             && $error_code <= 4_294_967_295;
 
-    $self->{session}->submit_rst_stream($stream->id, 0 + $error_code);
+    $self->{session}->submit_rst_stream($stream->stream_id, 0 + $error_code);
     $stream->_mark_cancelled(0 + $error_code, 0);
     return;
 }
@@ -206,7 +216,7 @@ sub _consume_stream_body {
         if $self->{closed} || !$self->{session};
     return unless $bytes;
 
-    $self->{session}->consume_stream($stream->id, $bytes);
+    $self->{session}->consume_stream($stream->stream_id, $bytes);
     return;
 }
 
@@ -318,7 +328,7 @@ sub _update_stream_priority {
     croak 'update_priority(): peer has not enabled RFC 9218 priorities'
         unless $enabled == 1;
 
-    $self->{session}->submit_priority_update($stream->id, $bytes);
+    $self->{session}->submit_priority_update($stream->stream_id, $bytes);
     return;
 }
 
