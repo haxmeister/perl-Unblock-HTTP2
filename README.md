@@ -494,7 +494,7 @@ The intended Perl compatibility floor is Perl 5.16.
 
 ## Status
 
-The core HTTP/2 protocol engine is feature-complete for the 0.001 release line.
+The core HTTP/2 protocol engine is feature-complete for the 0.01 release line.
 The test suite includes complete client/server exchanges entirely in memory,
 including streaming bodies, multiplexing, cancellation isolation, header-list
 limits, trailers, informational responses, peer SETTINGS enforcement, GOAWAY,

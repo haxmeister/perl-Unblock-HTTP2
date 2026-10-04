@@ -8,7 +8,7 @@ use Scalar::Util qw(blessed);
 use Uniform::HTTP::Request 0.04;
 use Uniform::HTTP::Response 0.04;
 
-our $VERSION = '0.001';
+our $VERSION = '0.01';
 
 my %FORBIDDEN = map { $_ => 1 } qw(
     connection
