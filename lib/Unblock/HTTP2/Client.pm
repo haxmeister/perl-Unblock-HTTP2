@@ -584,7 +584,7 @@ sub _write_stream_body {
     my ($self, $transaction, $bytes, $final, $operation) = @_;
 
     my $provider = $self->{providers}{ $transaction->stream_id }
-        or croak "$operation(): Stream has no streaming Request body";
+        or croak "$operation(): Transaction has no streaming Request body";
 
     $bytes = $self->_body_bytes("$operation()", $bytes);
     croak "$operation(): streaming Request body is already complete"

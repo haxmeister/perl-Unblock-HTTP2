@@ -415,7 +415,7 @@ sub _respond_stream {
     croak 'respond(): requires the Uniform HTTP response contract'
         unless $fast_view
             || Unblock::HTTP2::_Headers::_response_contract($response);
-    croak 'respond(): Stream already has a Response'
+    croak 'respond(): Transaction already has a Response'
         if $transaction->response;
 
     my $stream_body = exists($option{stream_body})
@@ -589,7 +589,7 @@ sub _write_stream_body {
     my ($self, $transaction, $bytes, $final, $operation) = @_;
 
     my $provider = $self->{providers}{ $transaction->stream_id }
-        or croak "$operation(): Stream has no streaming Response body";
+        or croak "$operation(): Transaction has no streaming Response body";
 
     $bytes = $self->_body_bytes("$operation()", $bytes);
     croak "$operation(): streaming Response body is already complete"
