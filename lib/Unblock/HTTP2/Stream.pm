@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
 
