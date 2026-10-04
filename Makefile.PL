@@ -35,7 +35,7 @@ WriteMakefile(
         'Net::HTTP2::nghttp2' => '0.011',
         'Scalar::Util'        => 0,
         'Test::More'          => 0,
-        'Uniform::HTTP'       => '0.03',
+        'Uniform::HTTP'       => '0.04',
     },
 
     META_MERGE => {
