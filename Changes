@@ -40,6 +40,8 @@ Revision history for Unblock-HTTP2
     - Add explicit goaway() control with HTTP/2 error codes, binary debug data,
       local GOAWAY introspection, and non-increasing last-stream boundaries.
     - Route drain() through the same GOAWAY control path.
+    - Close the engine deterministically when nghttp2 memory I/O reports a
+      fatal failure, retain close_reason(), and still rethrow to the caller.
     - Preserve RST_STREAM error codes with public RFC constants,
       Stream->reset(), error_code/error_name/reset_by_peer accessors, and
       reset codes passed through error callbacks for higher-layer retry policy.
