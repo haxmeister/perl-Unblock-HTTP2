@@ -16,6 +16,7 @@ use constant {
     H2_HEADERS           => 1,
     H2_GOAWAY            => 7,
     H2_END_STREAM        => 0x1,
+    H2_PROTOCOL_ERROR    => 1,
     H2_INTERNAL_ERROR    => 2,
     H2_CANCEL            => 8,
     H2_ENHANCE_YOUR_CALM => 11,
@@ -387,6 +388,15 @@ sub _on_frame_recv {
                 $self->_finish_response($stream_id);
             }
 
+            return 0;
+        }
+
+        if ($frame->{uniform_message}) {
+            $self->_stream_failure(
+                $stream_id,
+                'HTTP/2 trailing HEADERS must not contain :status',
+                H2_PROTOCOL_ERROR,
+            );
             return 0;
         }
 
