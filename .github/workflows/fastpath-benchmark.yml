@@ -14,12 +14,6 @@ jobs:
       - name: Check out FastPath branch
         uses: actions/checkout@v4
 
-      - name: Check out released baseline
-        uses: actions/checkout@v4
-        with:
-          ref: 681b434e9af4335a72b052ee9ad18c33260655d5
-          path: baseline
-
       - name: Set up Perl
         uses: shogo82148/actions-setup-perl@v1
         with:
@@ -33,17 +27,23 @@ jobs:
           cpanm --notest Alien::nghttp2
           cpanm --notest Uniform::HTTP@0.05
 
-      - name: Build released baseline
+      - name: Build FastPath branch
         shell: bash
         run: |
-          cd baseline
           perl Makefile.PL
           MAKE=$(perl -MConfig -e 'print $Config{make}')
           "$MAKE"
 
-      - name: Build FastPath branch
+      - name: Check out released baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 681b434e9af4335a72b052ee9ad18c33260655d5
+          path: baseline
+
+      - name: Build released baseline
         shell: bash
         run: |
+          cd baseline
           perl Makefile.PL
           MAKE=$(perl -MConfig -e 'print $Config{make}')
           "$MAKE"
@@ -55,12 +55,14 @@ jobs:
 
           run_baseline() {
             BENCH_LABEL=baseline \
+            BENCH_EXPECT_PATH=portable \
             PERL5LIB="$PWD/baseline/blib/lib:$PWD/baseline/blib/arch:$PERL5LIB" \
               perl xt/benchmark-uniform-fastpath.pl | tee -a benchmark-results.txt
           }
 
           run_fastpath() {
             BENCH_LABEL=fastpath \
+            BENCH_EXPECT_PATH=fastpath \
             PERL5LIB="$PWD/blib/lib:$PWD/blib/arch:$PERL5LIB" \
               perl xt/benchmark-uniform-fastpath.pl | tee -a benchmark-results.txt
           }
