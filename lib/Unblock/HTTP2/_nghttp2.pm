@@ -87,13 +87,13 @@ sub _submit_request_xs {
 }
 
 sub _submit_request_uniform_xs {
-    my ($self, $view, $body) = @_;
+    my ($self, $message, $body) = @_;
     my $provider = _body_provider($body);
-    return $self->_submit_request_uniform_native($view, $provider);
+    return $self->_submit_request_uniform_native($message, $provider);
 }
 
 sub submit_response_uniform {
-    my ($self, $stream_id, $view, %args) = @_;
+    my ($self, $stream_id, $message, %args) = @_;
     my $body = delete($args{body});
     my $data_callback = delete($args{data_callback});
     delete $args{callback_data};
@@ -107,22 +107,22 @@ sub submit_response_uniform {
 
     return $provider
         ? $self->_submit_response_uniform_streaming_native(
-            $stream_id, $view, $provider,
+            $stream_id, $message, $provider,
         )
         : $self->_submit_response_uniform_no_body_native(
-            $stream_id, $view,
+            $stream_id, $message,
         );
 }
 
 sub submit_response_headers_uniform {
-    my ($self, $stream_id, $view, %args) = @_;
+    my ($self, $stream_id, $message, %args) = @_;
     my $end_stream = delete($args{end_stream}) || 0;
     croak 'submit_response_headers_uniform(): unknown options: '
         . join(', ', sort keys %args)
         if %args;
 
     return $self->_submit_response_headers_uniform_native(
-        $stream_id, $view, $end_stream ? 1 : 0,
+        $stream_id, $message, $end_stream ? 1 : 0,
     );
 }
 
