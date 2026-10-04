@@ -41,7 +41,7 @@ Unblock::HTTP2 0.01 requires Perl 5.16 or newer.
 The distribution uses:
 
 ```text
-Uniform::HTTP  0.04+
+Uniform::HTTP  0.05+
 Alien::nghttp2 0.003+
 ```
 
