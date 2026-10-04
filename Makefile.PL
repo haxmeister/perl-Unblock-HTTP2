@@ -4,10 +4,12 @@ use Config;
 use ExtUtils::MakeMaker;
 
 require Alien::nghttp2;
+require Uniform::HTTP::FastPath;
 
 my $nghttp2_cflags = Alien::nghttp2->cflags;
 my $nghttp2_libs   = Alien::nghttp2->libs;
 my $nghttp2_define = $^O eq 'MSWin32' ? ' -DNGHTTP2_STATICLIB' : '';
+my $uniform_include = Uniform::HTTP::FastPath::native_include_dir();
 
 my $dist_version = MM->parse_version('lib/Unblock/HTTP2.pm');
 
@@ -38,12 +40,13 @@ WriteMakefile(
     CONFIGURE_REQUIRES => {
         'Alien::nghttp2'       => '0.003',
         'ExtUtils::MakeMaker'  => '6.64',
+        'Uniform::HTTP'        => '0.06',
     },
 
     PREREQ_PM => {
         'Carp'          => 0,
         'Scalar::Util'  => 0,
-        'Uniform::HTTP' => '0.05',
+        'Uniform::HTTP' => '0.06',
         'XSLoader'      => 0,
     },
 
@@ -54,6 +57,7 @@ WriteMakefile(
     XS      => { 'nghttp2.xs' => 'nghttp2.c' },
     OBJECT  => '$(O_FILES)',
     CCFLAGS => "$Config{ccflags} $nghttp2_cflags$nghttp2_define",
+    INC     => qq(-I"$uniform_include"),
     LIBS    => [ $nghttp2_libs ],
 
     META_MERGE => {
