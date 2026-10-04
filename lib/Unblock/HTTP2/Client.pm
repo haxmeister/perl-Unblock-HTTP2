@@ -138,13 +138,7 @@ sub peer_goaway {
 sub drain {
     my ($self) = @_;
     return $self if $self->is_closed || $self->{draining};
-
-    $self->{session}->submit_goaway(
-        last_stream_id => 0,
-        error_code     => 0,
-    );
-    $self->{draining} = 1;
-    return $self;
+    return $self->goaway(error_code => 0);
 }
 
 sub can_open_stream {
