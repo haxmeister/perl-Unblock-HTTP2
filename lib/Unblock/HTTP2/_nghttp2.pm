@@ -130,6 +130,13 @@ sub submit_trailer {
     return $self->_submit_trailer_native($stream_id, $headers);
 }
 
+sub submit_ping {
+    my ($self, $opaque) = @_;
+    croak 'submit_ping(): opaque data must be exactly 8 bytes'
+        unless defined($opaque) && !ref($opaque) && length($opaque) == 8;
+    return $self->_submit_ping_native($opaque);
+}
+
 sub submit_goaway {
     my ($self, %args) = @_;
     my $last_stream_id = delete $args{last_stream_id};
