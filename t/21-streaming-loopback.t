@@ -33,6 +33,8 @@ my $server = Unblock::HTTP2::Server->new(
 
         ok $request->is_complete,
             'streaming request becomes complete at END_STREAM';
+        is $request->trailer('x-request-end'), 'yes',
+            'streaming request trailers arrive before request end';
 
         my $response = Uniform::HTTP::Response->new(
             status  => 200,
@@ -45,6 +47,7 @@ my $server = Unblock::HTTP2::Server->new(
 
         is $stream->write('reply-one:'), 1,
             'first response chunk is accepted';
+        $response->add_trailer('X-Response-End', 'yes');
         $stream->end('reply-two');
     },
 
@@ -84,6 +87,8 @@ my $stream = $client->request(
         my ($stream) = @_;
         ok $stream->response->is_complete,
             'streaming response becomes complete at END_STREAM';
+        is $stream->response->trailer('x-response-end'), 'yes',
+            'streaming response trailers arrive before completion';
         $complete = 1;
     },
 
@@ -98,6 +103,7 @@ ok $request->is_complete,
 
 is $stream->write('request-one:'), 1,
     'first request chunk is accepted';
+$request->add_trailer('X-Request-End', 'yes');
 $stream->end('request-two');
 
 ok $request->is_complete,
