@@ -20,6 +20,7 @@ sub _initialize_connection {
     $self->{in_session_call} = 0;
     $self->{close_pending}   = undef;
     $self->{pending_drain}   = {};
+    $self->{output_pending}  = 0;
     return $self;
 }
 
@@ -49,7 +50,14 @@ sub want_read {
 sub want_write {
     my ($self) = @_;
     return 0 if $self->{closed} || !$self->{session};
-    return $self->{session}->want_write ? 1 : 0;
+    return $self->{output_pending} ? 1 : 0;
+}
+
+sub _mark_output_pending {
+    my ($self) = @_;
+    $self->{output_pending} = 1
+        unless $self->{closed};
+    return;
 }
 
 sub input {
@@ -75,6 +83,7 @@ sub input {
         return $consumed;
     }
 
+    $self->_mark_output_pending;
     $self->_after_session_call;
     return $consumed;
 }
@@ -86,7 +95,7 @@ sub output {
     croak 'output(): cannot be called from an HTTP/2 session callback'
         if $self->{in_session_call};
 
-    return '' unless $self->{session}->want_write;
+    return '' unless $self->{output_pending};
 
     my $bytes;
     {
@@ -99,8 +108,12 @@ sub output {
         return defined($bytes) ? $bytes : '';
     }
 
+    $bytes = '' unless defined $bytes;
+    $self->{output_pending} =
+        length($bytes) && $self->{session}->want_write ? 1 : 0;
+
     $self->_after_session_call;
-    return defined($bytes) ? $bytes : '';
+    return $bytes;
 }
 
 sub _register_stream {
