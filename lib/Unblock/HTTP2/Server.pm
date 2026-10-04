@@ -77,6 +77,7 @@ sub new {
         max_concurrent_streams  => 0 + $max_concurrent_streams,
         max_header_list_size    => 0 + $max_header_list_size,
         enable_connect_protocol => $enable_connect_protocol,
+        last_peer_stream_id     => 0,
         receive                 => {},
         providers               => {},
     }, $class;
@@ -127,8 +128,23 @@ sub draining {
     return $_[0]{draining} ? 1 : 0;
 }
 
+sub drain {
+    my ($self) = @_;
+    return $self if $self->is_closed || $self->{draining};
+
+    $self->{session}->submit_goaway(
+        last_stream_id => $self->{last_peer_stream_id},
+        error_code     => 0,
+    );
+    $self->{draining} = 1;
+    return $self;
+}
+
 sub _on_begin_headers {
     my ($self, $stream_id, $frame_type, $flags) = @_;
+
+    $self->{last_peer_stream_id} = $stream_id
+        if $stream_id > $self->{last_peer_stream_id};
 
     my $state = $self->{receive}{$stream_id} ||= {
         header_block          => [],
