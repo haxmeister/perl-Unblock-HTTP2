@@ -538,7 +538,19 @@ on_data_chunk_recv_callback(nghttp2_session *session,
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
     AV *args;
+    int consume_rv;
     int result;
+
+    consume_rv = nghttp2_session_consume_connection(session, len);
+    if (consume_rv != 0) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpvf(
+                "nghttp2_session_consume_connection failed (%d): %s",
+                consume_rv, nghttp2_strerror(consume_rv)
+            );
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
 
     if (!ps->cb_data_chunk_recv) {
         return 0;
@@ -677,6 +689,7 @@ new_session(pTHX_ HV *callbacks_hv, int server)
 {
     unblock_h2_session *ps;
     nghttp2_session_callbacks *callbacks = NULL;
+    nghttp2_option *option = NULL;
     int rv;
 
     ps = (unblock_h2_session *)calloc(1, sizeof(*ps));
@@ -693,12 +706,27 @@ new_session(pTHX_ HV *callbacks_hv, int server)
             rv, nghttp2_strerror(rv));
     }
 
+    rv = nghttp2_option_new(&option);
+    if (rv != 0) {
+        nghttp2_session_callbacks_del(callbacks);
+        release_callbacks(aTHX_ ps);
+        free(ps);
+        croak("nghttp2_option_new failed (%d): %s",
+            rv, nghttp2_strerror(rv));
+    }
+
+    nghttp2_option_set_no_auto_window_update(option, 1);
+
     if (server) {
-        rv = nghttp2_session_server_new(&ps->session, callbacks, ps);
+        rv = nghttp2_session_server_new2(
+            &ps->session, callbacks, ps, option);
     }
     else {
-        rv = nghttp2_session_client_new(&ps->session, callbacks, ps);
+        rv = nghttp2_session_client_new2(
+            &ps->session, callbacks, ps, option);
     }
+
+    nghttp2_option_del(option);
     nghttp2_session_callbacks_del(callbacks);
 
     if (rv != 0) {
@@ -951,6 +979,26 @@ remote_setting(self, setting_id)
         ps = session_from_sv(aTHX_ self);
         RETVAL = (UV)nghttp2_session_get_remote_settings(
             ps->session, (nghttp2_settings_id)setting_id);
+    OUTPUT:
+        RETVAL
+
+int
+consume_stream(self, stream_id, size)
+        SV *self
+        int stream_id
+        UV size
+    PREINIT:
+        unblock_h2_session *ps;
+        int rv;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        rv = nghttp2_session_consume_stream(
+            ps->session, stream_id, (size_t)size);
+        if (rv != 0) {
+            croak("nghttp2_session_consume_stream failed (%d): %s",
+                rv, nghttp2_strerror(rv));
+        }
+        RETVAL = rv;
     OUTPUT:
         RETVAL
 
