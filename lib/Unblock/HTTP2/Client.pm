@@ -651,7 +651,7 @@ Unblock::HTTP2::Client - one HTTP/2 client connection
 
     my $client = Unblock::HTTP2::Client->new;
 
-    my $stream = $client->request(
+    my $transaction = $client->request(
         Uniform::HTTP::Request->new(
             method    => 'GET',
             target    => '/',
@@ -660,15 +660,15 @@ Unblock::HTTP2::Client - one HTTP/2 client connection
         ),
 
         on_response => sub {
-            my ($stream, $response) = @_;
+            my ($transaction, $response) = @_;
         },
 
         on_body => sub {
-            my ($stream, $response, $bytes) = @_;
+            my ($transaction, $response, $bytes) = @_;
         },
 
         on_complete => sub {
-            my ($stream) = @_;
+            my ($transaction) = @_;
         },
     );
 
@@ -756,8 +756,8 @@ The Client also exposes the common connection methods:
     output
     close
 
-C<can_open_stream()> reports whether another local request stream can be
-opened.
+C<can_open_transaction()> reports whether another local request transaction can be
+opened. C<can_open_stream()> remains as a compatibility alias.
 
 =head1 SEE ALSO
 

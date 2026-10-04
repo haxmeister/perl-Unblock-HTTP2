@@ -301,8 +301,8 @@ response once one is available.
 
 For a streaming local body:
 
-    $stream->write($chunk);
-    $stream->end($last_chunk);
+    $transaction->write($chunk);
+    $transaction->end($last_chunk);
 
 C<write()> always accepts the bytes. A false return means the cooperative
 high-water mark was reached. Wait for C<on_drain> before producing more.
@@ -311,8 +311,8 @@ Incoming body bytes are consumed automatically after the body callback returns.
 
 For manual receive flow control:
 
-    $stream->auto_consume(0);
-    $stream->consume($bytes_processed);
+    $transaction->auto_consume(0);
+    $transaction->consume($bytes_processed);
 
 C<unconsumed_bytes()> reports body bytes still waiting for stream-level credit.
 
@@ -320,11 +320,11 @@ C<unconsumed_bytes()> reports body bytes still waiting for stream-level credit.
 
 A server Transaction can send an informational response with:
 
-    $stream->inform($response);
+    $transaction->inform($response);
 
 The final response uses:
 
-    $stream->respond($response);
+    $transaction->respond($response);
 
 Pass C<stream_body =E<gt> 1> to C<respond()> to produce the response body with
 C<write()> and C<end()>.

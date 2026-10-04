@@ -701,9 +701,9 @@ Unblock::HTTP2::Server - one HTTP/2 server connection
 
     my $server = Unblock::HTTP2::Server->new(
         on_request => sub {
-            my ($stream, $request) = @_;
+            my ($transaction, $request) = @_;
 
-            $stream->respond(
+            $transaction->respond(
                 Uniform::HTTP::Response->new(
                     status => 200,
                     body   => "hello\n",
