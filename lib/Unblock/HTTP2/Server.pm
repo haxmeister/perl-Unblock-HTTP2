@@ -42,6 +42,9 @@ sub new {
     my $max_header_list_size = exists($option{max_header_list_size})
         ? delete($option{max_header_list_size})
         : 65_536;
+    my $enable_connect_protocol = exists($option{enable_connect_protocol})
+        ? delete($option{enable_connect_protocol})
+        : 1;
 
     croak 'new(): max_concurrent_streams must be a positive integer'
         unless defined($max_concurrent_streams)
@@ -53,6 +56,12 @@ sub new {
             && !ref($max_header_list_size)
             && $max_header_list_size =~ /\A[0-9]+\z/
             && $max_header_list_size > 0;
+    croak 'new(): enable_connect_protocol must be zero or one'
+        if !defined($enable_connect_protocol)
+            || ref($enable_connect_protocol)
+            || "$enable_connect_protocol" !~ /\A[01]\z/;
+    $enable_connect_protocol = $enable_connect_protocol ? 1 : 0;
+
     croak 'new(): unknown options: ' . join(', ', sort keys %option)
         if %option;
 
@@ -63,12 +72,13 @@ sub new {
         unless Net::HTTP2::nghttp2->available;
 
     my $self = bless {
-        callbacks              => \%callbacks,
-        draining               => 0,
-        max_concurrent_streams => 0 + $max_concurrent_streams,
-        max_header_list_size   => 0 + $max_header_list_size,
-        receive                => {},
-        providers              => {},
+        callbacks               => \%callbacks,
+        draining                => 0,
+        max_concurrent_streams  => 0 + $max_concurrent_streams,
+        max_header_list_size    => 0 + $max_header_list_size,
+        enable_connect_protocol => $enable_connect_protocol,
+        receive                 => {},
+        providers               => {},
     }, $class;
 
     my $weak = $self;
@@ -106,13 +116,13 @@ sub new {
     $self->_initialize_connection($session);
 
     $session->send_connection_preface(
-        max_concurrent_streams => $self->{max_concurrent_streams},
-        max_header_list_size   => $self->{max_header_list_size},
+        max_concurrent_streams  => $self->{max_concurrent_streams},
+        max_header_list_size    => $self->{max_header_list_size},
+        enable_connect_protocol => $self->{enable_connect_protocol},
     );
 
     return $self;
 }
-
 sub draining {
     return $_[0]{draining} ? 1 : 0;
 }
@@ -225,10 +235,27 @@ sub _on_frame_recv {
             return 0;
         }
 
-        if (($frame->{flags} || 0) & H2_END_STREAM) {
-            $self->_request_end($stream_id);
+        if (!(($frame->{flags} || 0) & H2_END_STREAM)) {
+            $self->_stream_failure(
+                $stream_id,
+                'HTTP/2 trailing HEADERS must end the stream',
+            );
+            return 0;
         }
 
+        my $ok = eval {
+            Unblock::HTTP2::_Headers->apply_trailers(
+                $stream->request,
+                $state->{trailer_block},
+            );
+            1;
+        };
+        if (!$ok) {
+            $self->_stream_failure($stream_id, "$@");
+            return 0;
+        }
+
+        $self->_request_end($stream_id);
         return 0;
     }
 
@@ -239,7 +266,6 @@ sub _on_frame_recv {
 
     return 0;
 }
-
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $stream = $self->stream_for_id($stream_id) or return 0;
@@ -260,7 +286,7 @@ sub _request_end {
     return if $state->{request_end_called}++;
 
     my $stream = $self->stream_for_id($stream_id) or return;
-    $stream->request->mark_complete;
+    $stream->request->mark_complete->freeze;
 
     my $result = $self->_invoke_callback(
         'on_request_end', $stream, $stream->request,
@@ -269,7 +295,6 @@ sub _request_end {
         unless $result eq '1';
     return;
 }
-
 sub _invoke_callback {
     my ($self, $name, @args) = @_;
     my $callback = $self->{callbacks}{$name} or return 1;
@@ -297,13 +322,6 @@ sub _respond_stream {
     croak 'respond(): Stream already has a Response'
         if $stream->response;
 
-    if ($response->is_mutable) {
-        $response->version('2');
-    }
-    elsif (!defined($response->version) || $response->version ne '2') {
-        croak 'respond(): immutable Response must already have version 2';
-    }
-
     my $stream_body = exists($option{stream_body})
         ? delete($option{stream_body})
         : 0;
@@ -328,15 +346,28 @@ sub _respond_stream {
 
     my $block = Unblock::HTTP2::_Headers->response_headers($response);
     my @headers = @$block[1 .. $#$block];
+    my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
+        'respond()', $response,
+    );
 
     my $provider;
-    if ($stream_body) {
+    if ($stream_body || @$trailers) {
         $provider = {
-            queue     => '',
-            eof       => 0,
-            blocked   => 0,
-            stream_id => $stream->id,
+            queue             => '',
+            eof               => 0,
+            blocked           => 0,
+            stream_id         => $stream->id,
+            trailers          => undef,
+            trailer_submitted => 0,
         };
+
+        if (!$stream_body) {
+            $provider->{queue} = $response->has_buffered_body
+                ? $response->body
+                : '';
+            $provider->{eof} = 1;
+            $provider->{trailers} = $trailers if @$trailers;
+        }
 
         my $weak_self = $self;
         weaken($weak_self);
@@ -375,18 +406,22 @@ sub _respond_stream {
 
     if ($provider) {
         $self->{providers}{ $stream->id } = $provider;
-        $response->mark_incomplete;
     }
 
-    $response->commit;
     return $stream;
 }
-
 sub _provide_body {
     my ($self, $provider, $stream_id, $max_length) = @_;
 
     if (!length($provider->{queue})) {
-        return ('', 1) if $provider->{eof};
+        if ($provider->{eof}) {
+            if ($provider->{trailers}
+                && !$provider->{trailer_submitted}) {
+                $self->_submit_provider_trailers($provider);
+                return ('', 1, 1);
+            }
+            return ('', 1);
+        }
         return;
     }
 
@@ -395,6 +430,13 @@ sub _provide_body {
         : $max_length;
     my $chunk = substr($provider->{queue}, 0, $take, '');
     my $eof = $provider->{eof} && !length($provider->{queue}) ? 1 : 0;
+    my $no_end_stream = 0;
+
+    if ($eof && $provider->{trailers}
+        && !$provider->{trailer_submitted}) {
+        $self->_submit_provider_trailers($provider);
+        $no_end_stream = 1;
+    }
 
     if ($provider->{blocked}
         && length($provider->{queue}) < $BODY_LOW_WATER) {
@@ -402,9 +444,22 @@ sub _provide_body {
         $self->_queue_drain($provider->{stream_id});
     }
 
-    return ($chunk, $eof);
+    return $no_end_stream
+        ? ($chunk, $eof, 1)
+        : ($chunk, $eof);
 }
 
+sub _submit_provider_trailers {
+    my ($self, $provider) = @_;
+    return if $provider->{trailer_submitted};
+
+    $self->{session}->submit_trailer(
+        $provider->{stream_id},
+        headers => $provider->{trailers} || [],
+    );
+    $provider->{trailer_submitted} = 1;
+    return;
+}
 sub _write_stream_body {
     my ($self, $stream, $bytes, $final, $operation) = @_;
 
@@ -416,22 +471,23 @@ sub _write_stream_body {
         if $provider->{eof};
 
     $provider->{queue} .= $bytes;
-    $provider->{eof} = 1 if $final;
 
-    if ($final && $stream->response) {
-        $stream->response->mark_complete;
+    if ($final) {
+        my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
+            "$operation()", $stream->response,
+        );
+        $provider->{trailers} = $trailers if @$trailers;
+        $provider->{eof} = 1;
     }
 
     if ($self->{session}->is_stream_deferred($stream->id)) {
         $self->{session}->resume_stream($stream->id);
     }
 
-
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
     $provider->{blocked} = 1 if $blocked;
     return $blocked ? 0 : 1;
 }
-
 sub _cancel_stream {
     my ($self, $stream) = @_;
     return if $stream->is_terminal;
@@ -490,18 +546,15 @@ sub _on_stream_close {
             $self->_invoke_stream_error($stream, $error);
         }
         else {
-            $stream->request->mark_complete
-                unless $stream->request->is_complete;
-            $stream->response->mark_complete
-                if $stream->response
-                    && !$stream->response->is_complete;
+            if (!$stream->request->is_complete) {
+                $stream->request->mark_complete->freeze;
+            }
             $stream->_mark_complete;
         }
     }
 
     return 0;
 }
-
 sub close {
     my ($self, @args) = @_;
     $self->SUPER::close(@args);
