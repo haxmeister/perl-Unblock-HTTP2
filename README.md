@@ -18,20 +18,35 @@ The caller takes bytes back out with:
     }
 
 This makes the same engine usable with Linux::Event, IO::Async, AnyEvent,
-Mojolicious, blocking sockets, test transports, and other environments.
+Mojolicious, blocking sockets, in-memory transports, and other environments.
 
 ## Message objects
 
-Unblock::HTTP2 uses the shared Uniform HTTP message model directly:
+Unblock::HTTP2 uses Uniform::HTTP 0.04 directly:
 
     Uniform::HTTP::Request
     Uniform::HTTP::Response
 
 It does not define competing request and response classes.
 
-A Request can carry HTTP/2 :scheme and :authority through neutral Uniform
-request properties. Received message metadata is committed while body
-completeness can continue to change during streaming.
+Uniform carries the shared HTTP message semantics:
+
+- method, target, scheme, authority, and Extended CONNECT protocol
+- status
+- ordered duplicate-preserving headers
+- ordered duplicate-preserving trailers
+- an optional buffered body
+- message completeness and section mutability
+
+Unblock owns the HTTP/2 stream and connection behavior around those messages.
+
+Application-created outgoing messages may leave version unset. Sending them
+over HTTP/2 does not rewrite the object merely to set version 2. Received
+messages report version 2.
+
+Received initial metadata is frozen after validation while the body and trailer
+sections can continue to arrive. At END_STREAM the received message is complete
+and fully frozen.
 
 ## Client
 
@@ -84,6 +99,52 @@ write() accepts the bytes even when it returns false. A false return means the
 per-stream cooperative high-water mark was reached. Resume production after
 on_drain.
 
+## Trailers
+
+Uniform trailers are sent as real HTTP/2 trailing HEADERS.
+
+    my $request = Uniform::HTTP::Request->new(
+        method    => 'POST',
+        target    => '/upload',
+        scheme    => 'https',
+        authority => 'example.com',
+        body      => $bytes,
+        trailers  => [
+            [ 'Content-Digest', $digest ],
+        ],
+    );
+
+For a streaming local body, add any final trailer fields to the Uniform message
+before calling stream end(). Unblock snapshots them when body production ends.
+
+Incoming trailers are added to the received Uniform Request or Response before
+on_request_end or on_complete runs.
+
+## Extended CONNECT
+
+Extended CONNECT uses Uniform's neutral protocol metadata:
+
+    my $request = Uniform::HTTP::Request->new(
+        method    => 'CONNECT',
+        protocol  => 'websocket',
+        scheme    => 'https',
+        authority => 'example.com',
+        target    => '/chat',
+    );
+
+The same API can carry connect-udp or future Extended CONNECT protocol tokens.
+Unblock maps the value to :protocol. It does not implement WebSocket,
+CONNECT-UDP, or WebTransport semantics itself.
+
+Servers advertise SETTINGS_ENABLE_CONNECT_PROTOCOL by default. Set:
+
+    enable_connect_protocol => 0
+
+on Server->new if the host does not want to advertise generic Extended CONNECT
+support.
+
+Ordinary CONNECT is also represented directly with an authority-form target.
+
 ## Server
 
     use Uniform::HTTP::Response;
@@ -123,7 +184,8 @@ For a streaming response:
 
 - HTTP/2 client and server sessions
 - multiplexed stream state
-- HTTP/2 header and pseudo-header mapping
+- HTTP/2 header, trailer, and pseudo-header mapping
+- ordinary and Extended CONNECT mapping
 - SETTINGS
 - GOAWAY drain state
 - RST_STREAM cancellation
@@ -145,12 +207,13 @@ For a streaming response:
 - authentication policy
 - proxy policy
 - HTTP/1 fallback
+- WebSocket, CONNECT-UDP, or WebTransport tunnel semantics
 
 Those belong to the caller or to a higher HTTP client/server layer.
 
 ## Dependencies
 
-Unblock::HTTP2 currently uses Uniform::HTTP 0.03 or newer for HTTP messages and
+Unblock::HTTP2 currently uses Uniform::HTTP 0.04 or newer for HTTP messages and
 Net::HTTP2::nghttp2 0.011 or newer for libnghttp2 bindings.
 
 The intended Perl compatibility floor is Perl 5.16.
@@ -159,9 +222,10 @@ The intended Perl compatibility floor is Perl 5.16.
 
 The distribution is under active development and has not been released.
 
-The current development tests include a complete HTTP/2 client/server exchange
-entirely in memory. No socket, TLS implementation, or event loop is involved in
-that test.
+The development suite includes complete HTTP/2 client/server exchanges entirely
+in memory, including streaming bodies, multiplexing, cancellation isolation,
+header-list limits, trailers, and Extended CONNECT. No socket, TLS
+implementation, or event loop is involved in those tests.
 
 ## License
 
