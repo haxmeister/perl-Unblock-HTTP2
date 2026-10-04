@@ -194,6 +194,30 @@ For a streaming response:
     $stream->write($chunk);
     $stream->end;
 
+## Stream resets and error codes
+
+C<cancel()> remains the simple way to cancel a stream. It sends the standard
+C<CANCEL> RST_STREAM code.
+
+For explicit protocol reasons, use:
+
+    $stream->reset(Unblock::HTTP2::REFUSED_STREAM());
+
+Known HTTP/2 error codes are public package constants on Unblock::HTTP2,
+including C<NO_ERROR>, C<PROTOCOL_ERROR>, C<FLOW_CONTROL_ERROR>,
+C<REFUSED_STREAM>, and C<CANCEL>.
+
+When a stream is reset, the Stream preserves:
+
+    $stream->error_code
+    $stream->error_name
+    $stream->reset_by_peer
+
+C<reset_by_peer> distinguishes a received RST_STREAM from one initiated by the
+local application. Error callbacks also receive the numeric HTTP/2 error code
+as an additional argument when one exists. This lets higher layers implement
+retry policy without Unblock deciding which requests should be retried.
+
 ## Receive-side flow control
 
 Incoming body bytes are automatically credited back to the peer after the body
