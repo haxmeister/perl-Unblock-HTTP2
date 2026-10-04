@@ -3259,3 +3259,189 @@ _clear_deferred(self, stream_id)
         if (provider) {
             provider->deferred = 0;
         }
+
+
+MODULE = Unblock::HTTP2    PACKAGE = Unblock::HTTP2::_nghttp2::NativeDriver
+
+SV *
+new(CLASS, engine)
+        const char *CLASS
+        SV *engine
+    PREINIT:
+        ub_http2_native_context *context;
+        SV *inner;
+        SV *object;
+    CODE:
+        context = (ub_http2_native_context *)
+            ub_http2_native_create(aTHX_ engine);
+        if (!context) {
+            croak("engine does not support Unblock::HTTP2 native transport");
+        }
+        inner = newSViv(PTR2IV(context));
+        object = newRV_noinc(inner);
+        sv_bless(object, gv_stashpv(CLASS, GV_ADD));
+        RETVAL = object;
+    OUTPUT:
+        RETVAL
+
+void
+feed(self, buffer)
+        SV *self
+        SV *buffer
+    PREINIT:
+        SV *inner;
+        ub_http2_native_context *context;
+        STRLEN buffer_len;
+        const char *data;
+        size_t consumed = 0;
+        int status;
+    PPCODE:
+        if (!SvROK(self)
+            || !sv_derived_from(
+                self, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
+            croak("not an Unblock::HTTP2 native transport driver");
+        }
+        inner = SvRV(self);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        if (!context) {
+            croak("native transport driver has already been released");
+        }
+
+        data = SvPVbyte(buffer, buffer_len);
+        status = ub_http2_native_input(
+            aTHX_
+            context,
+            data,
+            (size_t)buffer_len,
+            &consumed
+        );
+
+        XPUSHs(sv_2mortal(newSViv(status)));
+        XPUSHs(sv_2mortal(newSVuv((UV)consumed)));
+
+void
+drain(self, pause_after_first = 0)
+        SV *self
+        int pause_after_first
+    PREINIT:
+        SV *inner;
+        ub_http2_native_context *context;
+        SV *output;
+        ub_http2_test_sink_context sink;
+        size_t produced = 0;
+        int status;
+    PPCODE:
+        if (!SvROK(self)
+            || !sv_derived_from(
+                self, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
+            croak("not an Unblock::HTTP2 native transport driver");
+        }
+        inner = SvRV(self);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        if (!context) {
+            croak("native transport driver has already been released");
+        }
+
+        output = newSVpvn("", 0);
+        sink.buffer = output;
+        sink.pause_after_first = pause_after_first ? 1 : 0;
+        sink.chunks = 0;
+
+        status = ub_http2_native_output(
+            aTHX_
+            context,
+            ub_http2_test_output_sink,
+            &sink,
+            &produced
+        );
+
+        XPUSHs(sv_2mortal(newSViv(status)));
+        XPUSHs(sv_2mortal(output));
+        XPUSHs(sv_2mortal(newSVuv((UV)produced)));
+
+int
+want_read(self)
+        SV *self
+    PREINIT:
+        SV *inner;
+        ub_http2_native_context *context;
+    CODE:
+        if (!SvROK(self)
+            || !sv_derived_from(
+                self, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
+            croak("not an Unblock::HTTP2 native transport driver");
+        }
+        inner = SvRV(self);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        if (!context) {
+            croak("native transport driver has already been released");
+        }
+        RETVAL = ub_http2_native_want_read(aTHX_ context);
+    OUTPUT:
+        RETVAL
+
+int
+want_write(self)
+        SV *self
+    PREINIT:
+        SV *inner;
+        ub_http2_native_context *context;
+    CODE:
+        if (!SvROK(self)
+            || !sv_derived_from(
+                self, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
+            croak("not an Unblock::HTTP2 native transport driver");
+        }
+        inner = SvRV(self);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        if (!context) {
+            croak("native transport driver has already been released");
+        }
+        RETVAL = ub_http2_native_want_write(aTHX_ context);
+    OUTPUT:
+        RETVAL
+
+int
+eof(self)
+        SV *self
+    PREINIT:
+        SV *inner;
+        ub_http2_native_context *context;
+    CODE:
+        if (!SvROK(self)
+            || !sv_derived_from(
+                self, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
+            croak("not an Unblock::HTTP2 native transport driver");
+        }
+        inner = SvRV(self);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        if (!context) {
+            croak("native transport driver has already been released");
+        }
+        RETVAL = ub_http2_native_eof(aTHX_ context);
+    OUTPUT:
+        RETVAL
+
+void
+DESTROY(self)
+        SV *self
+    PREINIT:
+        SV *inner;
+        ub_http2_native_context *context;
+    CODE:
+        if (!SvROK(self)) {
+            XSRETURN_EMPTY;
+        }
+        inner = SvRV(self);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        if (!context) {
+            XSRETURN_EMPTY;
+        }
+        ub_http2_native_destroy(aTHX_ context);
+        sv_setiv(inner, 0);
