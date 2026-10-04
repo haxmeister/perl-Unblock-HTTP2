@@ -388,9 +388,25 @@ Both client and server engines can begin a graceful HTTP/2 shutdown with:
 
     $engine->drain;
 
-This queues GOAWAY and marks the connection as draining. A client will not open
-new request streams after local drain or after receiving peer GOAWAY. Streams
-that were already accepted can continue to completion.
+This queues a NO_ERROR GOAWAY and marks the connection as draining. A client
+will not open new request streams after local drain or after receiving peer
+GOAWAY. Streams that were already accepted can continue to completion.
+
+For an explicit protocol shutdown reason, use:
+
+    $engine->goaway(
+        error_code => Unblock::HTTP2::ENHANCE_YOUR_CALM(),
+        debug_data => $bytes,
+    );
+
+Server GOAWAY defaults to the highest peer request stream already observed.
+Client GOAWAY defaults to stream zero because server push is disabled.
+C<last_stream_id> can be supplied explicitly when an application needs a
+narrower boundary. A later GOAWAY may keep or lower that boundary but cannot
+increase it.
+
+C<local_goaway()> returns a copy of the most recently submitted boundary,
+error code, and debug bytes.
 
 After receiving GOAWAY, peer_goaway() returns the peer's last stream ID, HTTP/2
 error code, and debug data. Unblock exposes those facts but does not decide
