@@ -68,10 +68,10 @@ jobs:
 
           test -f .interop-ready
 
-          nghttp -v -t 5 http://127.0.0.1:18081/             > .interop-nghttp-body 2> .interop-nghttp-log
+          nghttp -v -t 5 http://127.0.0.1:18081/ > .interop-nghttp.log 2>&1
 
           wait "$SERVER_PID"
 
-          grep -Fx 'unblock-server-ok' .interop-nghttp-body
-          grep -F ':status: 200' .interop-nghttp-log
-          grep -F 'x-unblock-interop: nghttp' .interop-nghttp-log
+          grep -F 'unblock-server-ok' .interop-nghttp.log
+          grep -F ':status: 200' .interop-nghttp.log
+          grep -F 'x-unblock-interop: nghttp' .interop-nghttp.log
