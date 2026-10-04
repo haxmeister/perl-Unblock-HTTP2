@@ -359,6 +359,29 @@ Unblock does not implement keepalive intervals, deadlines, liveness policy, or
 round-trip timers. Those decisions belong to the caller or higher connection
 policy.
 
+## Invalid frames and extension safety
+
+nghttp2 performs HTTP/2 frame and state validation. When it receives an invalid
+non-DATA frame, it automatically queues the protocol-required RST_STREAM or
+GOAWAY response.
+
+Both Client and Server can observe that event without taking over protocol
+handling:
+
+    on_invalid_frame => sub {
+        my ($engine, $frame, $lib_error_code) = @_;
+    }
+
+The frame value is a plain hash containing protocol facts such as type, flags,
+stream_id, and length. The library error code is the numeric nghttp2 validation
+code; it is deliberately not translated into an HTTP/2 wire error code.
+
+Unknown extension frame types remain valid HTTP/2 extensibility points and are
+ignored rather than reported as invalid.
+
+nghttp2's separate error logging callback is not public protocol state and is
+not routed through application on_error callbacks.
+
 ## Graceful draining
 
 Both client and server engines can begin a graceful HTTP/2 shutdown with:
