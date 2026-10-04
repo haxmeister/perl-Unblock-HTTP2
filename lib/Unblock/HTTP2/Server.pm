@@ -31,6 +31,7 @@ sub new {
     for my $name (qw(
         on_request on_body on_request_end on_error
         on_settings on_settings_ack on_ping on_ping_ack on_priority
+        on_invalid_frame
     )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
@@ -115,9 +116,9 @@ sub new {
                 my $self = $weak or return 0;
                 return $self->_on_stream_close(@_);
             },
-            on_error => sub {
+            on_invalid_frame => sub {
                 my $self = $weak or return 0;
-                return $self->_on_session_error(@_);
+                return $self->_on_invalid_frame(@_);
             },
         },
     );
@@ -360,10 +361,15 @@ sub _invoke_callback {
     return $ok ? 1 : $@;
 }
 
-sub _on_session_error {
-    my ($self, $lib_error_code, $message) = @_;
-    my $callback = $self->{callbacks}{on_error} or return 0;
-    eval { $callback->(undef, "$message") };
+sub _on_invalid_frame {
+    my ($self, $frame, $lib_error_code) = @_;
+
+    my $copy = ref($frame) eq 'HASH' ? { %$frame } : {};
+    $self->_invoke_control_callback(
+        'on_invalid_frame',
+        $copy,
+        0 + ($lib_error_code || 0),
+    );
     return 0;
 }
 
