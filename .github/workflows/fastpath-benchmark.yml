@@ -22,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libnghttp2-dev pkg-config
           cpanm --notest Alien::nghttp2
-          cpanm --notest Uniform::HTTP@0.05
+          cpanm --notest Uniform::HTTP@0.06
 
       - name: Build FastPath branch
         shell: bash
