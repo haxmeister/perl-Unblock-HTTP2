@@ -1,13 +1,13 @@
 # Unblock::HTTP2 feature scope
 
-Unblock::HTTP2 0.01 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.02 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 protocol engine.
 
 That does not mean every historical or optional HTTP/2 extension is included.
 
 ## Included
 
-The 0.01 core includes:
+The 0.02 core includes:
 
 - client and server HTTP/2 sessions
 - connection preface handling
@@ -29,8 +29,10 @@ The 0.01 core includes:
 - invalid-frame observation
 - safe handling of unknown extension frame types
 - fatal session failure reporting
+- Uniform::HTTP 0.05 FastPath support for canonical messages
 
-HTTP messages use Uniform::HTTP 0.05. Canonical Uniform messages use the optional FastPath ABI; adapters and subclasses keep the portable message contract.
+HTTP messages use Uniform::HTTP 0.05. Canonical Uniform messages use the
+FastPath ABI. Adapters and subclasses keep the portable message contract.
 
 ## Intentionally not included
 
@@ -95,4 +97,4 @@ Future changes should normally be one of:
 - documentation improvements
 
 The core transport boundary and HTTP/2 session model do not need further
-feature work for the 0.01 release.
+feature work for the 0.02 release.
