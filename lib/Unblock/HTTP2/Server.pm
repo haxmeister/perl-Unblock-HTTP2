@@ -370,8 +370,10 @@ sub _on_invalid_frame {
 sub _inform_stream {
     my ($self, $stream, $response) = @_;
 
+    my $fast_view = Unblock::HTTP2::_Headers->fast_view($response);
     croak 'inform(): requires the Uniform HTTP response contract'
-        unless Unblock::HTTP2::_Headers::_response_contract($response);
+        unless $fast_view
+            || Unblock::HTTP2::_Headers::_response_contract($response);
     croak 'inform(): final Response already submitted'
         if $stream->response;
 
@@ -389,11 +391,19 @@ sub _inform_stream {
     croak 'inform(): informational Response must not have trailers'
         if @$trailers;
 
-    my $block = Unblock::HTTP2::_Headers->response_headers($response);
-    $self->{session}->submit_headers(
-        $stream->id,
-        headers => $block,
-    );
+    if ($fast_view) {
+        $self->{session}->submit_response_headers_uniform(
+            $stream->id,
+            $fast_view,
+        );
+    }
+    else {
+        my $block = Unblock::HTTP2::_Headers->response_headers($response);
+        $self->{session}->submit_headers(
+            $stream->id,
+            headers => $block,
+        );
+    }
 
     return $stream;
 }
@@ -401,8 +411,10 @@ sub _inform_stream {
 sub _respond_stream {
     my ($self, $stream, $response, %option) = @_;
 
+    my $fast_view = Unblock::HTTP2::_Headers->fast_view($response);
     croak 'respond(): requires the Uniform HTTP response contract'
-        unless Unblock::HTTP2::_Headers::_response_contract($response);
+        unless $fast_view
+            || Unblock::HTTP2::_Headers::_response_contract($response);
     croak 'respond(): Stream already has a Response'
         if $stream->response;
 
@@ -428,8 +440,11 @@ sub _respond_stream {
     croak 'respond(): stream_body cannot be combined with a buffered body'
         if $stream_body && $response->has_buffered_body;
 
-    my $block = Unblock::HTTP2::_Headers->response_headers($response);
-    my @headers = @$block[1 .. $#$block];
+    my ($block, @headers);
+    if (!$fast_view) {
+        $block = Unblock::HTTP2::_Headers->response_headers($response);
+        @headers = @$block[1 .. $#$block];
+    }
     my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
         'respond()', $response,
     );
@@ -461,27 +476,53 @@ sub _respond_stream {
             return $self->_provide_body($provider, @_);
         };
 
-        $self->{session}->submit_response(
-            $stream->id,
-            status        => $response->status,
-            headers       => \@headers,
-            data_callback => $data_callback,
-        );
+        if ($fast_view) {
+            $self->{session}->submit_response_uniform(
+                $stream->id,
+                $fast_view,
+                data_callback => $data_callback,
+            );
+        }
+        else {
+            $self->{session}->submit_response(
+                $stream->id,
+                status        => $response->status,
+                headers       => \@headers,
+                data_callback => $data_callback,
+            );
+        }
     }
     elsif ($response->has_buffered_body) {
-        $self->{session}->submit_response(
-            $stream->id,
-            status  => $response->status,
-            headers => \@headers,
-            body    => $response->body,
-        );
+        if ($fast_view) {
+            $self->{session}->submit_response_uniform(
+                $stream->id,
+                $fast_view,
+                body => $response->body,
+            );
+        }
+        else {
+            $self->{session}->submit_response(
+                $stream->id,
+                status  => $response->status,
+                headers => \@headers,
+                body    => $response->body,
+            );
+        }
     }
     else {
-        $self->{session}->submit_response(
-            $stream->id,
-            status  => $response->status,
-            headers => \@headers,
-        );
+        if ($fast_view) {
+            $self->{session}->submit_response_uniform(
+                $stream->id,
+                $fast_view,
+            );
+        }
+        else {
+            $self->{session}->submit_response(
+                $stream->id,
+                status  => $response->status,
+                headers => \@headers,
+            );
+        }
     }
 
     $stream->_set_response($response);
