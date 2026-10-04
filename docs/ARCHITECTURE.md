@@ -149,6 +149,28 @@ when end() is called.
 Incoming trailing HEADERS are validated as ordinary HTTP/2 fields, added to the
 Uniform trailer section, then frozen before message completion is reported.
 
+## SETTINGS control plane
+
+SETTINGS is part of the public protocol engine rather than a private backend
+escape hatch. Client and Server accept an initial settings hash, expose the
+locally advertised values and libnghttp2's effective peer values, and can
+submit later SETTINGS changes.
+
+Peer SETTINGS frames are surfaced as protocol facts through on_settings. The
+callback receives both the current effective peer snapshot and the values that
+changed in that frame. SETTINGS acknowledgements are matched in submission
+order and surfaced through on_settings_ack. settings_pending() reports the
+number of locally submitted SETTINGS frames still awaiting ACK.
+
+The public layer validates RFC value ranges before asking libnghttp2 to submit
+a frame. It also enforces extension semantics that are part of the HTTP/2
+protocol surface, including the rule that SETTINGS_ENABLE_CONNECT_PROTOCOL
+cannot be changed from 1 back to 0.
+
+The private binding remains responsible for SETTINGS frame processing and
+effective state. It only exposes the received identifier/value pairs needed to
+describe peer changes without exposing nghttp2 objects to callers.
+
 ## Graceful draining
 
 Client and Server expose drain() as the graceful connection-shutdown operation.
