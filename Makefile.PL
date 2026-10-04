@@ -43,7 +43,7 @@ WriteMakefile(
     PREREQ_PM => {
         'Carp'          => 0,
         'Scalar::Util'  => 0,
-        'Uniform::HTTP' => '0.04',
+        'Uniform::HTTP' => '0.05',
         'XSLoader'      => 0,
     },
 
