@@ -54,8 +54,7 @@ sub submit_batch {
 
     for my $index (1 .. $iterations) {
         if ($native_fast) {
-            my $view = Uniform::HTTP::FastPath::view($request);
-            $session->_submit_request_uniform_xs($view, undef);
+            $session->_submit_request_uniform_xs($request, undef);
         }
         else {
             my $block = Unblock::HTTP2::_Headers->request_headers($request);
