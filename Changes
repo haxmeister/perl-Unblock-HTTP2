@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP2
 
-0.02  Not yet released
+0.02  2026-10-04
     - Require Uniform::HTTP 0.05 and use its FastPath ABI for exact canonical
       Request and Response objects.
     - Map canonical outgoing headers directly to nghttp2_nv in XS, avoiding
@@ -10,6 +10,9 @@ Revision history for Unblock-HTTP2
     - Build received canonical Request and Response objects through trusted
       FastPath construction after Unblock has validated their HTTP/2 semantics.
     - Keep subclasses and framework adapters on the normal Uniform contract.
+    - Add repeatable FastPath performance comparison tooling under xt/ and CI.
+      The small-message benchmark shows large gains in native submission and
+      full in-memory request/response throughput.
 
 0.01  2026-10-04
     - Initial release of a standalone, event-loop and operating-system neutral
