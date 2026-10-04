@@ -676,6 +676,14 @@ C<output()> while C<want_write()> is true.
 
 Many request Streams can be active at once.
 
+=head1 CONSTRUCTOR
+
+C<new()> accepts an initial C<settings> hash, C<max_active_streams>, and
+C<max_header_list_size>.
+
+Connection callbacks include C<on_settings>, C<on_settings_ack>, C<on_ping>,
+C<on_ping_ack>, and C<on_invalid_frame>.
+
 =head1 REQUESTS
 
 C<request($request, %options)> sends a L<Uniform::HTTP::Request> and returns a
@@ -718,11 +726,18 @@ C<write()> and C<end()> methods.
 
 The Client also exposes the common connection methods:
 
+    is_closed
+    close_reason
+    stream_count
+    stream_for_id
     local_settings
+    local_setting
     peer_settings
+    peer_setting
     update_settings
     settings_pending
     ping
+    draining
     drain
     goaway
     local_goaway
