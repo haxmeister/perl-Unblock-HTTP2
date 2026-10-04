@@ -158,8 +158,10 @@ sub request {
     croak 'request(): connection is closed' if $self->is_closed;
     croak 'request(): connection cannot accept another stream'
         unless $self->can_open_stream;
+    my $fast_view = Unblock::HTTP2::_Headers->fast_view($request);
     croak 'request(): requires the Uniform HTTP request contract'
-        unless Unblock::HTTP2::_Headers::_request_contract($request);
+        unless $fast_view
+            || Unblock::HTTP2::_Headers::_request_contract($request);
 
     if (defined($request->protocol) && length($request->protocol)) {
         my $enabled = $self->peer_setting('enable_connect_protocol');
@@ -193,7 +195,9 @@ sub request {
     croak 'request(): stream_body cannot be combined with a buffered body'
         if $stream_body && $request->has_buffered_body;
 
-    my $block = Unblock::HTTP2::_Headers->request_headers($request);
+    my $block = $fast_view
+        ? undef
+        : Unblock::HTTP2::_Headers->request_headers($request);
     my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
         'request()', $request,
     );
@@ -229,10 +233,9 @@ sub request {
         $body = $request->body;
     }
 
-    my $stream_id = $self->{session}->_submit_request_xs(
-        $block,
-        $body,
-    );
+    my $stream_id = $fast_view
+        ? $self->{session}->_submit_request_uniform_xs($fast_view, $body)
+        : $self->{session}->_submit_request_xs($block, $body);
 
     my $stream = Unblock::HTTP2::Stream->_new(
         connection => $self,
