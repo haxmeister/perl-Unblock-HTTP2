@@ -1,64 +1,25 @@
 Revision history for Unblock-HTTP2
 
 0.01  Not yet released
-    - Start standalone event-loop and operating-system neutral HTTP/2 engine.
+    - Initial release of a standalone, event-loop and operating-system neutral
+      HTTP/2 protocol engine.
     - Use Uniform::HTTP 0.04 Request and Response objects directly.
-    - Add byte-in/byte-out Client and Server engines with no socket ownership.
-    - Add multiplexed Stream objects, streaming request/response bodies,
-      cooperative backpressure, cancellation, GOAWAY drain state, and decoded
-      header-list limits.
-    - Preserve application-owned outgoing Uniform messages without stamping a
-      transport-selected version onto them.
-    - Map received message lifecycle with freeze_initial(), trailers, and final
-      completion/freeze semantics.
-    - Add first-class request and response trailers over trailing HEADERS.
-    - Add ordinary CONNECT and generic Extended CONNECT :protocol mapping.
-    - Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL on the server by default.
-    - Add graceful client/server GOAWAY draining while allowing accepted streams
-      to finish.
-    - Replace Net::HTTP2::nghttp2 with a small private XS binding to libnghttp2,
-      built through Alien::nghttp2.
-    - Query effective peer SETTINGS for Extended CONNECT and remote stream
-      concurrency enforcement.
-    - Add Stream->inform() for one or more non-final informational Responses.
-    - Preserve received GOAWAY last-stream-id, error code, and debug data.
-    - Add application-driven receive flow control with per-stream consume()
-      credit while keeping connection-level credit independent.
-    - Add a public SETTINGS control plane with initial configuration, effective
-      peer/local views, later updates, peer-change notifications, ACK tracking,
-      RFC value validation, and no private nghttp2 session access.
-    - Add connection-level PING with exact eight-byte opaque payloads, distinct
-      PING/PING-ACK callbacks, automatic protocol ACKs, and no keepalive policy.
-    - Add RFC 9218 extensible prioritization with
-      SETTINGS_NO_RFC7540_PRIORITIES, ordinary Priority headers,
-      client Stream->update_priority(), and server on_priority observation.
-    - Add symmetric on_invalid_frame observation for protocol-invalid
-      frames while retaining nghttp2's automatic RST_STREAM/GOAWAY handling.
-    - Verify unknown extension frame types are ignored as required by HTTP/2.
-    - Stop routing nghttp2's debug-only error callback through public server
-      on_error.
-    - Add explicit goaway() control with HTTP/2 error codes, binary debug data,
-      local GOAWAY introspection, and non-increasing last-stream boundaries.
-    - Route drain() through the same GOAWAY control path.
-    - Close the engine deterministically when nghttp2 memory I/O reports a
-      fatal failure, retain close_reason(), and still rethrow to the caller.
-    - Enforce SETTINGS_ENABLE_PUSH as client-to-server only; servers now reject
-      the setting even when the attempted value is zero.
-    - Correct the documented public SETTINGS list to include
-      no_rfc7540_priorities.
-    - Tighten outbound pseudo-header validation so ordinary requests cannot
-      emit an empty :path and Extended CONNECT cannot emit an empty :protocol.
-    - Preserve RST_STREAM error codes with public RFC constants,
-      Stream->reset(), error_code/error_name/reset_by_peer accessors, and
-      reset codes passed through error callbacks for higher-layer retry policy.
-    - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
-    - Add in-memory client/server protocol tests with no socket or event loop,
-      including trailers and Extended CONNECT.
-    - Add release packaging metadata, explicit MANIFEST and generated-file
-      ignore rules.
-    - Separate test-only prerequisites from runtime prerequisites.
-    - Add CI distcheck/disttest coverage for the generated CPAN distribution.
-    - Clean README Markdown rendering and add release-facing installation and
-      status information.
-    - Add CI-only bidirectional interoperability coverage against the
-      independent nghttp2 nghttpd server and nghttp client.
+    - Provide byte-in/byte-out Client and Server engines with multiplexed Stream
+      objects and no socket, TLS, or event-loop ownership.
+    - Use a small private XS binding to libnghttp2 through Alien::nghttp2.
+    - Support buffered and streaming request and response bodies, cooperative
+      backpressure, trailers, informational responses, and half-close state.
+    - Support ordinary CONNECT and generic Extended CONNECT.
+    - Support SETTINGS inspection and updates, PING, GOAWAY, graceful draining,
+      stream resets, standard HTTP/2 error codes, and preserved reset details.
+    - Support application-controlled receive flow control while keeping
+      connection-level credit independent from slow streams.
+    - Support RFC 9218 extensible priorities and deliberately omit the
+      deprecated RFC 7540 dependency-tree priority API.
+    - Advertise SETTINGS_ENABLE_PUSH = 0; Server Push is not exposed.
+    - Preserve fatal session errors, invalid-frame observations, unknown
+      extension-frame safety, and GOAWAY details for higher-layer policy.
+    - Add in-memory protocol tests, packaged-distribution distcheck/disttest,
+      and bidirectional interoperability tests against stock nghttp2 tools.
+    - Test Perl 5.16 on Linux, current Perl on Linux and macOS, and Strawberry
+      Perl on Windows.
