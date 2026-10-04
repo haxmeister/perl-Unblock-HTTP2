@@ -3,7 +3,7 @@ package Unblock::HTTP2::Client;
 use strict;
 use warnings;
 use Carp qw(croak);
-use Scalar::Util qw(blessed weaken);
+use Scalar::Util qw(weaken);
 use parent 'Unblock::HTTP2::_Connection';
 
 use Unblock::HTTP2::_Headers;
@@ -116,16 +116,6 @@ sub request {
     croak 'request(): requires the Uniform HTTP request contract'
         unless Unblock::HTTP2::_Headers::_request_contract($request);
 
-    if ($request->is_mutable) {
-        $request->version('2');
-    }
-    elsif (!defined($request->version) || $request->version ne '2') {
-        croak 'request(): immutable Request must already have version 2';
-    }
-
-    croak 'request(): ordinary CONNECT is not supported by the current client API'
-        if uc($request->method) eq 'CONNECT';
-
     my $stream_body = exists($option{stream_body})
         ? delete($option{stream_body})
         : 0;
@@ -153,37 +143,44 @@ sub request {
         if $stream_body && $request->has_buffered_body;
 
     my $block = Unblock::HTTP2::_Headers->request_headers($request);
-    my @headers = grep { substr($_->[0], 0, 1) ne ':' } @$block;
+    my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
+        'request()', $request,
+    );
 
-    my ($provider, $body_callback, $body);
-    if ($stream_body) {
+    my ($provider, $body);
+    if ($stream_body || @$trailers) {
         $provider = {
-            queue     => '',
-            eof       => 0,
-            blocked   => 0,
-            stream_id => undef,
+            queue             => '',
+            eof               => 0,
+            blocked           => 0,
+            stream_id         => undef,
+            trailers          => undef,
+            trailer_submitted => 0,
         };
+
+        if (!$stream_body) {
+            $provider->{queue} = $request->has_buffered_body
+                ? $request->body
+                : '';
+            $provider->{eof} = 1;
+            $provider->{trailers} = $trailers if @$trailers;
+        }
 
         my $weak_self = $self;
         weaken($weak_self);
 
-        $body_callback = sub {
+        $body = sub {
             my $self = $weak_self or return ('', 1);
             return $self->_provide_body($provider, @_);
         };
-        $body = $body_callback;
     }
     elsif ($request->has_buffered_body) {
         $body = $request->body;
     }
 
-    my $stream_id = $self->{session}->submit_request(
-        method    => $request->method,
-        path      => $request->target,
-        scheme    => $request->scheme,
-        authority => $request->authority,
-        headers   => \@headers,
-        body      => $body,
+    my $stream_id = $self->{session}->_submit_request_xs(
+        $block,
+        $body,
     );
 
     my $stream = Unblock::HTTP2::Stream->_new(
@@ -195,28 +192,34 @@ sub request {
 
     $self->_register_stream($stream);
     $self->{receive}{$stream_id} = {
-        header_block         => [],
-        header_list_size     => 0,
+        header_block          => [],
+        trailer_block         => [],
+        collecting            => 'initial',
+        header_list_size      => 0,
         header_limit_exceeded => 0,
-        response             => undef,
-        response_done        => 0,
+        response              => undef,
+        response_done         => 0,
     };
 
     if ($provider) {
         $provider->{stream_id} = $stream_id;
         $self->{providers}{$stream_id} = $provider;
-        $request->mark_incomplete;
     }
 
-    $request->commit;
     return $stream;
 }
-
 sub _provide_body {
     my ($self, $provider, $stream_id, $max_length) = @_;
 
     if (!length($provider->{queue})) {
-        return ('', 1) if $provider->{eof};
+        if ($provider->{eof}) {
+            if ($provider->{trailers}
+                && !$provider->{trailer_submitted}) {
+                $self->_submit_provider_trailers($provider);
+                return ('', 1, 1);
+            }
+            return ('', 1);
+        }
         return;
     }
 
@@ -225,6 +228,13 @@ sub _provide_body {
         : $max_length;
     my $chunk = substr($provider->{queue}, 0, $take, '');
     my $eof = $provider->{eof} && !length($provider->{queue}) ? 1 : 0;
+    my $no_end_stream = 0;
+
+    if ($eof && $provider->{trailers}
+        && !$provider->{trailer_submitted}) {
+        $self->_submit_provider_trailers($provider);
+        $no_end_stream = 1;
+    }
 
     if ($provider->{blocked}
         && length($provider->{queue}) < $BODY_LOW_WATER) {
@@ -232,19 +242,40 @@ sub _provide_body {
         $self->_queue_drain($provider->{stream_id});
     }
 
-    return ($chunk, $eof);
+    return $no_end_stream
+        ? ($chunk, $eof, 1)
+        : ($chunk, $eof);
 }
 
+sub _submit_provider_trailers {
+    my ($self, $provider) = @_;
+    return if $provider->{trailer_submitted};
+
+    $self->{session}->submit_trailer(
+        $provider->{stream_id},
+        headers => $provider->{trailers} || [],
+    );
+    $provider->{trailer_submitted} = 1;
+    return;
+}
 sub _on_begin_headers {
     my ($self, $stream_id, $frame_type, $flags) = @_;
     my $state = $self->{receive}{$stream_id} or return 0;
 
-    $state->{header_block} = [];
     $state->{header_list_size} = 0;
     $state->{header_limit_exceeded} = 0;
+
+    if ($state->{response}) {
+        $state->{trailer_block} = [];
+        $state->{collecting} = 'trailer';
+    }
+    else {
+        $state->{header_block} = [];
+        $state->{collecting} = 'initial';
+    }
+
     return 0;
 }
-
 sub _on_header {
     my ($self, $stream_id, $name, $value, $flags) = @_;
     my $state = $self->{receive}{$stream_id} or return 0;
@@ -264,10 +295,12 @@ sub _on_header {
     }
 
     $state->{header_list_size} = $size;
-    push @{ $state->{header_block} }, [ $name, $value ];
+    my $key = $state->{collecting} eq 'trailer'
+        ? 'trailer_block'
+        : 'header_block';
+    push @{ $state->{$key} }, [ $name, $value ];
     return 0;
 }
-
 sub _status_from_block {
     my ($block) = @_;
     for my $pair (@$block) {
@@ -346,10 +379,27 @@ sub _on_frame_recv {
             return 0;
         }
 
-        if (($frame->{flags} || 0) & H2_END_STREAM) {
-            $self->_finish_response($stream_id);
+        if (!(($frame->{flags} || 0) & H2_END_STREAM)) {
+            $self->_stream_failure(
+                $stream_id,
+                'HTTP/2 trailing HEADERS must end the stream',
+            );
+            return 0;
         }
 
+        my $ok = eval {
+            Unblock::HTTP2::_Headers->apply_trailers(
+                $state->{response},
+                $state->{trailer_block},
+            );
+            1;
+        };
+        if (!$ok) {
+            $self->_stream_failure($stream_id, "$@");
+            return 0;
+        }
+
+        $self->_finish_response($stream_id);
         return 0;
     }
 
@@ -360,7 +410,6 @@ sub _on_frame_recv {
 
     return 0;
 }
-
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $state = $self->{receive}{$stream_id} or return 0;
@@ -398,14 +447,13 @@ sub _finish_response {
         return;
     }
 
-    $response->mark_complete;
+    $response->mark_complete->freeze;
 
     my $result = $stream->_invoke('on_complete');
     $self->_invoke_stream_error($stream, "$result")
         unless $result eq '1';
     return;
 }
-
 sub _on_stream_close {
     my ($self, $stream_id, $error_code) = @_;
     my $state = delete $self->{receive}{$stream_id};
@@ -420,14 +468,12 @@ sub _on_stream_close {
         $self->_invoke_stream_error($stream, $error);
     }
     elsif ($state && $state->{response}) {
-        $state->{response}->mark_complete;
+        $state->{response}->mark_complete->freeze;
         if (!$state->{response_done}) {
             my $result = $stream->_invoke('on_complete');
             $self->_invoke_stream_error($stream, "$result")
                 unless $result eq '1';
         }
-        $stream->request->mark_complete
-            unless $stream->request->is_complete;
         $stream->_mark_complete;
     }
     else {
@@ -438,7 +484,6 @@ sub _on_stream_close {
 
     return 0;
 }
-
 sub _stream_failure {
     my ($self, $stream_id, $error, $code) = @_;
     $code = H2_INTERNAL_ERROR unless defined $code;
@@ -465,22 +510,23 @@ sub _write_stream_body {
         if $provider->{eof};
 
     $provider->{queue} .= $bytes;
-    $provider->{eof} = 1 if $final;
 
     if ($final) {
-        $stream->request->mark_complete;
+        my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
+            "$operation()", $stream->request,
+        );
+        $provider->{trailers} = $trailers if @$trailers;
+        $provider->{eof} = 1;
     }
 
     if ($self->{session}->is_stream_deferred($stream->id)) {
         $self->{session}->resume_stream($stream->id);
     }
 
-
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
     $provider->{blocked} = 1 if $blocked;
     return $blocked ? 0 : 1;
 }
-
 sub _respond_stream {
     croak 'respond(): client-side streams cannot send Responses';
 }
