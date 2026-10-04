@@ -1,6 +1,12 @@
 use strict;
 use warnings;
+use Config;
 use ExtUtils::MakeMaker;
+
+require Alien::nghttp2;
+
+my $nghttp2_cflags = Alien::nghttp2->cflags;
+my $nghttp2_libs   = Alien::nghttp2->libs;
 
 my @public_modules = qw(
     Unblock::HTTP2
@@ -27,16 +33,22 @@ WriteMakefile(
     MIN_PERL_VERSION => '5.016',
 
     CONFIGURE_REQUIRES => {
-        'ExtUtils::MakeMaker' => '6.64',
+        'Alien::nghttp2'       => '0.003',
+        'ExtUtils::MakeMaker'  => '6.64',
     },
 
     PREREQ_PM => {
-        'Carp'                => 0,
-        'Net::HTTP2::nghttp2' => '0.011',
-        'Scalar::Util'        => 0,
-        'Test::More'          => 0,
-        'Uniform::HTTP'       => '0.04',
+        'Carp'          => 0,
+        'Scalar::Util'  => 0,
+        'Test::More'    => 0,
+        'Uniform::HTTP' => '0.04',
+        'XSLoader'      => 0,
     },
+
+    XS      => { 'nghttp2.xs' => 'nghttp2.c' },
+    OBJECT  => '$(O_FILES)',
+    CCFLAGS => "$Config{ccflags} $nghttp2_cflags",
+    LIBS    => [ $nghttp2_libs ],
 
     META_MERGE => {
         'meta-spec' => { version => 2 },
@@ -55,11 +67,13 @@ WriteMakefile(
             package => [qw(
                 Unblock::HTTP2::_Connection
                 Unblock::HTTP2::_Headers
+                Unblock::HTTP2::_nghttp2
+                Unblock::HTTP2::_nghttp2::Session
             )],
         },
     },
 
     clean => {
-        FILES => 'Unblock-HTTP2-*',
+        FILES => 'Unblock-HTTP2-* nghttp2.c nghttp2.o',
     },
 );
