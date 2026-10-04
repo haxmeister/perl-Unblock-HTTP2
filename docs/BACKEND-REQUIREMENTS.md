@@ -57,8 +57,8 @@ Sessions disable automatic WINDOW_UPDATE.
 
 Connection-level credit and stream-level credit are released separately.
 
-This lets Unblock keep the shared connection moving while allowing one Stream
-to delay its own credit until the application has consumed body bytes.
+This lets Unblock keep the shared connection moving while allowing one HTTP/2
+stream to delay its own credit until the application has consumed body bytes.
 
 ## DATA providers
 

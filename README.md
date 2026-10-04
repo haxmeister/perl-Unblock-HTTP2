@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP2
 ```
 
-Unblock::HTTP2 0.02 requires Perl 5.16 or newer.
+Unblock::HTTP2 0.03 requires Perl 5.16 or newer.
 
 The distribution uses:
 
@@ -113,7 +113,8 @@ my $transaction = $client->request(
 );
 ```
 
-Many transactions can be active on one Client at the same time. Each is carried by an HTTP/2 stream.
+Many transactions can be active on one Client at the same time. Each is
+carried by an HTTP/2 stream.
 
 ## Server
 
@@ -161,7 +162,7 @@ $transaction->end($last_chunk);
 
 The same `write()` and `end()` API is used for a streaming server response.
 
-`write()` always accepts the bytes. A false return means the stream reached
+`write()` always accepts the bytes. A false return means the transaction reached
 its cooperative high-water mark. Pause production until `on_drain` runs.
 
 Incoming body bytes are automatically credited back to the peer after the body
@@ -318,7 +319,7 @@ included in the CPAN distribution.
 
 ## Status
 
-Unblock::HTTP2 0.02 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.03 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 engine.
 
 Future work can focus on bug fixes, interoperability, performance, or optional

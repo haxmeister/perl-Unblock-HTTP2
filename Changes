@@ -1,13 +1,18 @@
 Revision history for Unblock-HTTP2
 
-Unreleased
+0.03  2026-10-04
     - Rename the public per-request object from Stream to Transaction so
       Unblock::HTTP1, Unblock::HTTP2, and Unblock::HTTP3 share the same
       application-facing concept.
-    - Expose stream_id(), transaction_count(), transaction_for_stream_id(), and
-      can_open_transaction() as the preferred public names.
-    - Keep HTTP/2 stream terminology only for protocol-level concepts such as
-      stream IDs, flow control, RST_STREAM, GOAWAY boundaries, and SETTINGS.
+    - Rename the related public API: id() becomes stream_id(), stream_count()
+      becomes transaction_count(), stream_for_id() becomes
+      transaction_for_stream_id(), can_open_stream() becomes
+      can_open_transaction(), and max_active_streams becomes
+      max_active_transactions.
+    - Do not provide compatibility aliases for the old Stream API. This is an
+      intentional early-version API cleanup.
+    - Keep HTTP/2 stream terminology for protocol-level concepts such as stream
+      IDs, flow control, RST_STREAM, GOAWAY boundaries, and SETTINGS.
 
 0.02  2026-10-04
     - Require Uniform::HTTP 0.05 and use its FastPath ABI for exact canonical

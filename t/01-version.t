@@ -12,7 +12,7 @@ use Unblock::HTTP2::_nghttp2;
 
 my $version = $Unblock::HTTP2::VERSION;
 
-is $version, '0.02', 'distribution version is 0.02';
+is $version, '0.03', 'distribution version is 0.03';
 
 for my $module (
     [ 'Unblock::HTTP2::Client',      $Unblock::HTTP2::Client::VERSION ],

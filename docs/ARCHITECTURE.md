@@ -76,7 +76,8 @@ rewrite them merely to stamp an HTTP version onto the object.
 
 ## Transactions and streams
 
-One `Unblock::HTTP2::Transaction` represents one HTTP request/response exchange carried by one HTTP/2 stream.
+One `Unblock::HTTP2::Transaction` represents one HTTP request/response exchange
+carried by one HTTP/2 stream.
 The Transaction exposes that protocol identifier as `stream_id()`. Internal
 nghttp2 state and RFC-defined controls continue to use stream terminology.
 
