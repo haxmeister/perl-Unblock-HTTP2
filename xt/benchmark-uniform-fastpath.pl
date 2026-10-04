@@ -150,7 +150,7 @@ sub exchange_count {
     while ($completed < $target) {
         while ($submitted < $count
             && ($submitted - ($completed - $start_completed)) < 96
-            && $client->can_open_stream) {
+            && $client->can_open_transaction) {
             $client->request(
                 $request,
                 on_complete => $on_complete,

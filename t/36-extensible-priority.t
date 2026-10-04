@@ -50,7 +50,7 @@ my $stream = $client->request($request);
 
 pump_until($client, $server, sub { $server_stream });
 
-is $server_stream->id, $stream->id,
+is $server_stream->stream_id, $stream->stream_id,
     'client and server agree on prioritized stream id';
 
 is $stream->update_priority('u=0, i'), $stream,
@@ -60,7 +60,7 @@ pump_until_idle($client, $server);
 
 is scalar(@priority_updates), 1,
     'server observes one PRIORITY_UPDATE frame';
-is $priority_updates[0][0], $stream->id,
+is $priority_updates[0][0], $stream->stream_id,
     'PRIORITY_UPDATE identifies the request stream';
 is $priority_updates[0][1], 'u=0, i',
     'PRIORITY_UPDATE preserves the complete Priority field value';

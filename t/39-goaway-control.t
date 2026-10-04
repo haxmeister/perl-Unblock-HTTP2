@@ -44,7 +44,7 @@ sub request_for {
     is_deeply(
         $server->local_goaway,
         {
-            last_stream_id => $stream->id,
+            last_stream_id => $stream->stream_id,
             error_code     => Unblock::HTTP2::ENHANCE_YOUR_CALM(),
             debug_data     => 'busy',
         },
@@ -56,7 +56,7 @@ sub request_for {
     is_deeply(
         $client->peer_goaway,
         {
-            last_stream_id => $stream->id,
+            last_stream_id => $stream->stream_id,
             error_code     => Unblock::HTTP2::ENHANCE_YOUR_CALM(),
             debug_data     => 'busy',
         },
@@ -82,7 +82,7 @@ sub request_for {
     );
 
     my $increase_ok = eval {
-        $server->goaway(last_stream_id => $stream->id);
+        $server->goaway(last_stream_id => $stream->stream_id);
         1;
     };
     ok !$increase_ok,
