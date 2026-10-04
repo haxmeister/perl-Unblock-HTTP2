@@ -43,22 +43,10 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install nghttp2 pkg-config
 
-      - name: Install Uniform development contract
-        uses: actions/checkout@v4
-        with:
-          repository: haxmeister/perl-Uniform-HTTP
-          ref: feature/unblock-http2-support
-          path: _uniform_http
-
-      - name: Use Uniform development contract
-        run: |
-          UNIFORM_LIB=$(cd _uniform_http && perl -MCwd=abs_path -MConfig -e 'print abs_path("lib")')
-          PATH_SEP=$(perl -MConfig -e 'print $Config{path_sep}')
-          echo "PERL5LIB=$UNIFORM_LIB$PATH_SEP$PERL5LIB" >> "$GITHUB_ENV"
-
       - name: Install dependencies
         run: |
           cpanm --notest Net::HTTP2::nghttp2
+          cpanm --notest Uniform::HTTP@0.04
           cpanm --notest --installdeps .
 
       - name: Build and test
