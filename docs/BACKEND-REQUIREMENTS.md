@@ -26,6 +26,7 @@ The private binding exposes only the pieces Unblock needs:
 - local SETTINGS submission
 - effective remote SETTINGS queries
 - received SETTINGS identifier/value details and ACK flags
+- invalid non-DATA frame callbacks with frame metadata and nghttp2 error codes
 - RFC 9218 PRIORITY_UPDATE submission and built-in receive processing
 - request and response submission
 - generic HEADERS submission
@@ -86,6 +87,19 @@ RST_STREAM into a generic string.
 Explicit local reset uses nghttp2_submit_rst_stream with the caller's validated
 32-bit error code. CANCEL remains only a convenience default; the private
 binding does not choose retry semantics.
+
+## Invalid frame handling
+
+The private binding registers nghttp2's on_invalid_frame_recv callback. The
+callback converts the frame header and any already-supported frame details into
+a plain Perl hash and also returns the numeric nghttp2 library error code.
+
+The public engine uses this only for observation. nghttp2 remains responsible
+for automatically submitting the corresponding RST_STREAM or GOAWAY.
+
+The binding also contains nghttp2's optional error logging callback support,
+but that callback is diagnostic output rather than protocol state and is not
+wired to the public Client or Server error API.
 
 ## Extensible priorities
 
