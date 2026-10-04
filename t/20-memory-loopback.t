@@ -23,8 +23,10 @@ my $server = Unblock::HTTP2::Server->new(
         is $request->scheme, 'https', 'server receives scheme';
         is $request->authority, 'example.test',
             'server receives authority';
-        ok !$request->is_mutable,
-            'server request metadata is committed';
+        ok !$request->initial_is_mutable,
+            'server request initial metadata is frozen';
+        ok $request->trailers_are_mutable,
+            'server request can still acquire trailers before completion';
         ok !$request->is_complete,
             'server sees request as incomplete before DATA finishes';
     },
@@ -50,8 +52,10 @@ my $server = Unblock::HTTP2::Server->new(
         );
 
         $stream->respond($response);
-        ok !$response->is_mutable,
-            'submitted server response metadata is committed';
+        ok $response->initial_is_mutable,
+            'submitted application response remains application-owned';
+        is $response->version, undef,
+            'server submission does not stamp HTTP version onto application response';
     },
 
     on_error => sub {
@@ -87,8 +91,10 @@ my $stream = $client->request(
             'client receives response headers';
         is $response->header('x-reply'), 'memory-loopback',
             'client receives custom response header';
-        ok !$response->is_mutable,
-            'client response metadata is committed';
+        ok !$response->initial_is_mutable,
+            'client response initial metadata is frozen';
+        ok $response->trailers_are_mutable,
+            'client response can still acquire trailers before completion';
         ok !$response->is_complete,
             'client sees response as incomplete before DATA finishes';
     },
@@ -111,7 +117,10 @@ my $stream = $client->request(
     },
 );
 
-ok !$request->is_mutable, 'submitted client request metadata is committed';
+ok $request->initial_is_mutable,
+    'submitted client request remains application-owned';
+is $request->version, undef,
+    'client submission leaves application request version neutral';
 
 sub transfer {
     my ($from, $to) = @_;
