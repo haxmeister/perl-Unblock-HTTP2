@@ -197,7 +197,7 @@ is $connect->version, undef,
     'Extended CONNECT request remains version neutral';
 is $connect->protocol, 'websocket',
     'application Extended CONNECT metadata is unchanged';
-is_deeply \@server_errors, [], 'server reports no Uniform 0.04 errors';
-is_deeply \@client_errors, [], 'client reports no Uniform 0.04 errors';
+is_deeply \@server_errors, [], 'server reports no Uniform 0.05 errors';
+is_deeply \@client_errors, [], 'client reports no Uniform 0.05 errors';
 
 done_testing;
