@@ -13,7 +13,8 @@ my @informational;
 my $final;
 my @errors;
 
-my $server = Unblock::HTTP2::Server->new(
+my $server;
+$server = Unblock::HTTP2::Server->new(
     on_request => sub {
         my ($stream, $request) = @_;
 
