@@ -27,10 +27,12 @@ my $BODY_LOW_WATER  = 32_768;
 sub new {
     my ($class, %option) = @_;
 
-    my $max_active_streams =
-        delete($option{max_active_streams}) || 100;
-    my $max_header_list_size =
-        delete($option{max_header_list_size}) || 65_536;
+    my $max_active_streams = exists($option{max_active_streams})
+        ? delete($option{max_active_streams})
+        : 100;
+    my $max_header_list_size = exists($option{max_header_list_size})
+        ? delete($option{max_header_list_size})
+        : 65_536;
 
     croak 'new(): max_active_streams must be a positive integer'
         unless defined($max_active_streams) && !ref($max_active_streams)
@@ -124,7 +126,13 @@ sub request {
     croak 'request(): ordinary CONNECT is not supported by the current client API'
         if uc($request->method) eq 'CONNECT';
 
-    my $stream_body = delete($option{stream_body}) ? 1 : 0;
+    my $stream_body = exists($option{stream_body})
+        ? delete($option{stream_body})
+        : 0;
+    croak 'request(): stream_body must be zero or one'
+        if !defined($stream_body) || ref($stream_body)
+            || "$stream_body" !~ /\A[01]\z/;
+    $stream_body = $stream_body ? 1 : 0;
 
     my %callbacks;
     for my $name (qw(
@@ -391,7 +399,6 @@ sub _finish_response {
     }
 
     $response->mark_complete;
-    $stream->_mark_complete;
 
     my $result = $stream->_invoke('on_complete');
     $self->_invoke_stream_error($stream, "$result")
@@ -414,10 +421,14 @@ sub _on_stream_close {
     }
     elsif ($state && $state->{response}) {
         $state->{response}->mark_complete;
+        if (!$state->{response_done}) {
+            my $result = $stream->_invoke('on_complete');
+            $self->_invoke_stream_error($stream, "$result")
+                unless $result eq '1';
+        }
+        $stream->request->mark_complete
+            unless $stream->request->is_complete;
         $stream->_mark_complete;
-        my $result = $stream->_invoke('on_complete');
-        $self->_invoke_stream_error($stream, "$result")
-            unless $result eq '1';
     }
     else {
         my $error = 'HTTP/2 stream closed before final Response';
