@@ -40,8 +40,8 @@ my $server = Unblock::HTTP2::Server->new(
         );
 
         $stream->respond($response, stream_body => 1);
-        ok !$response->is_complete,
-            'streaming response becomes incomplete when submitted';
+        ok $response->is_complete,
+            'application response completeness is independent of stream production';
 
         is $stream->write('reply-one:'), 1,
             'first response chunk is accepted';
@@ -93,15 +93,15 @@ my $stream = $client->request(
     },
 );
 
-ok !$request->is_complete,
-    'streaming request is incomplete after submission';
+ok $request->is_complete,
+    'application request completeness is not repurposed for stream production';
 
 is $stream->write('request-one:'), 1,
     'first request chunk is accepted';
 $stream->end('request-two');
 
 ok $request->is_complete,
-    'local request becomes complete when producer ends';
+    'ending the stream does not mutate application request completeness';
 
 pump_until($client, $server, sub { $complete });
 
