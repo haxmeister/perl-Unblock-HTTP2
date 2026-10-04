@@ -27,6 +27,21 @@ my $BODY_LOW_WATER  = 32_768;
 sub new {
     my ($class, %option) = @_;
 
+    my %callbacks;
+    for my $name (qw(on_settings on_settings_ack)) {
+        next unless exists $option{$name};
+        my $callback = delete $option{$name};
+        croak "new(): $name must be a coderef"
+            if defined($callback) && ref($callback) ne 'CODE';
+        $callbacks{$name} = $callback if $callback;
+    }
+
+    my $settings = exists($option{settings})
+        ? delete($option{settings})
+        : {};
+    croak 'new(): settings must be a hash reference'
+        unless ref($settings) eq 'HASH';
+
     my $max_active_streams = exists($option{max_active_streams})
         ? delete($option{max_active_streams})
         : 100;
@@ -86,13 +101,19 @@ sub new {
         },
     );
 
-    $self->_initialize_connection($session);
+    $self->_initialize_connection(
+        $session,
+        role      => 'client',
+        callbacks => \%callbacks,
+    );
 
-    $session->send_connection_preface(
+    my %initial_settings = (
         max_concurrent_streams => 100,
         max_header_list_size   => $self->{max_header_list_size},
         enable_push            => 0,
+        %$settings,
     );
+    $self->_submit_settings('new()', \%initial_settings);
 
     return $self;
 }
@@ -124,9 +145,7 @@ sub can_open_stream {
     return 0 if $self->is_closed || $self->{draining};
 
     my $limit = $self->{max_active_streams};
-    my $peer_limit = $self->{session}->remote_setting(
-        Unblock::HTTP2::_nghttp2::SETTINGS_MAX_CONCURRENT_STREAMS(),
-    );
+    my $peer_limit = $self->peer_setting('max_concurrent_streams');
     $limit = $peer_limit if $peer_limit < $limit;
 
     return $self->stream_count < $limit ? 1 : 0;
@@ -142,9 +161,7 @@ sub request {
         unless Unblock::HTTP2::_Headers::_request_contract($request);
 
     if (defined($request->protocol) && length($request->protocol)) {
-        my $enabled = $self->{session}->remote_setting(
-            Unblock::HTTP2::_nghttp2::SETTINGS_ENABLE_CONNECT_PROTOCOL(),
-        );
+        my $enabled = $self->peer_setting('enable_connect_protocol');
         croak 'request(): peer has not enabled Extended CONNECT'
             unless $enabled == 1;
     }
@@ -344,6 +361,8 @@ sub _status_from_block {
 
 sub _on_frame_recv {
     my ($self, $frame) = @_;
+
+    return 0 if $self->_handle_settings_frame($frame);
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
