@@ -329,6 +329,9 @@ static HV *
 frame_to_hv(pTHX_ const nghttp2_frame *frame)
 {
     HV *hv = newHV();
+    AV *settings_av;
+    AV *entry_av;
+    size_t i;
 
     hv_store(hv, "stream_id", 9, newSViv(frame->hd.stream_id), 0);
     hv_store(hv, "type", 4, newSViv(frame->hd.type), 0);
@@ -338,6 +341,20 @@ frame_to_hv(pTHX_ const nghttp2_frame *frame)
     if (frame->hd.type == NGHTTP2_HEADERS) {
         hv_store(hv, "headers_category", 16,
             newSViv(frame->headers.cat), 0);
+    }
+    else if (frame->hd.type == NGHTTP2_SETTINGS
+             && !(frame->hd.flags & NGHTTP2_FLAG_ACK)) {
+        settings_av = newAV();
+        for (i = 0; i < frame->settings.niv; i++) {
+            entry_av = newAV();
+            av_push(entry_av,
+                newSViv((IV)frame->settings.iv[i].settings_id));
+            av_push(entry_av,
+                newSVuv((UV)frame->settings.iv[i].value));
+            av_push(settings_av, newRV_noinc((SV *)entry_av));
+        }
+        hv_store(hv, "settings", 8,
+            newRV_noinc((SV *)settings_av), 0);
     }
     else if (frame->hd.type == NGHTTP2_GOAWAY) {
         hv_store(hv, "last_stream_id", 14,
