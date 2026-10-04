@@ -161,6 +161,21 @@ sub _queue_drain {
     return;
 }
 
+sub _reset_stream {
+    my ($self, $stream, $error_code) = @_;
+
+    croak 'reset(): connection is closed'
+        if $self->{closed} || !$self->{session};
+    croak 'reset(): error code must be an unsigned 32-bit integer'
+        unless defined($error_code) && !ref($error_code)
+            && "$error_code" =~ /\A[0-9]+\z/
+            && $error_code <= 4_294_967_295;
+
+    $self->{session}->submit_rst_stream($stream->id, 0 + $error_code);
+    $stream->_mark_cancelled(0 + $error_code, 0);
+    return;
+}
+
 sub _consume_stream_body {
     my ($self, $stream, $bytes) = @_;
 
@@ -531,8 +546,8 @@ sub _finish_close {
 }
 
 sub _invoke_stream_error {
-    my ($self, $stream, $error) = @_;
-    my $result = $stream->_invoke('on_error', $error);
+    my ($self, $stream, $error, $error_code) = @_;
+    my $result = $stream->_invoke('on_error', $error, $error_code);
     return $result;
 }
 
