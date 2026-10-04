@@ -23,7 +23,7 @@ The Perl layer needs:
 
 - client and server session creation
 - memory input and output
-- frame, header, DATA, invalid-frame, and stream-close callbacks
+- frame, native header-block collection, DATA, invalid-frame, and stream-close callbacks
 - request and response submission
 - generic HEADERS submission
 - DATA providers and resume
