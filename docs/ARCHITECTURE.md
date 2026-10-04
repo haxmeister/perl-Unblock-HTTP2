@@ -129,6 +129,18 @@ reaches the high-water mark. nghttp2 pulls bytes from the queue as protocol and
 flow-control credit permit. Once the queue falls below the low-water mark,
 on_drain is delivered after the current nghttp2 call has returned.
 
+Receive flow control uses nghttp2 with automatic WINDOW_UPDATE disabled.
+Connection-level DATA credit is released as bytes are delivered into the
+Unblock stream, while stream-level credit is released separately. Streams
+auto-consume delivered body bytes by default after their body callback returns.
+
+A caller can disable automatic consumption on one Stream with
+auto_consume(0). Delivered-but-unreleased bytes are then bounded by that
+stream's HTTP/2 receive window. consume($bytes) releases stream-level credit as
+the application actually processes data. This keeps a slow stream from
+unnecessarily consuming the shared connection window and blocking unrelated
+streams.
+
 When an outgoing Uniform message contains trailers, the final DATA deliberately
 reserves END_STREAM and Unblock submits the Uniform trailer fields as the
 terminal HEADERS block. For a streaming body, trailer fields are snapshotted
