@@ -575,9 +575,7 @@ sub _write_stream_body {
 sub _cancel_stream {
     my ($self, $stream) = @_;
     return if $stream->is_terminal;
-
-    eval { $self->{session}->submit_rst_stream($stream->id, H2_CANCEL) };
-    $stream->_mark_cancelled;
+    $self->_reset_stream($stream, H2_CANCEL);
     return;
 }
 
@@ -590,11 +588,11 @@ sub _stream_failure {
     my $stream = $self->stream_for_id($stream_id);
 
     if ($stream && !$stream->is_terminal) {
-        $stream->_fail($error);
-        $self->_invoke_stream_error($stream, $error);
+        $stream->_fail($error, $code, 0);
+        $self->_invoke_stream_error($stream, $error, $code);
     }
     elsif (my $callback = $self->{callbacks}{on_error}) {
-        eval { $callback->(undef, $error) };
+        eval { $callback->(undef, $error, $code) };
     }
 
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
@@ -602,17 +600,17 @@ sub _stream_failure {
 }
 
 sub _invoke_stream_error {
-    my ($self, $stream, $error) = @_;
+    my ($self, $stream, $error, $error_code) = @_;
 
-    my $result = $stream->_invoke('on_error', $error);
+    my $result = $stream->_invoke('on_error', $error, $error_code);
     if ($result ne '1') {
         my $callback = $self->{callbacks}{on_error};
-        eval { $callback->($stream, "$result") } if $callback;
+        eval { $callback->($stream, "$result", $error_code) } if $callback;
         return;
     }
 
     my $callback = $self->{callbacks}{on_error};
-    eval { $callback->($stream, $error) } if $callback;
+    eval { $callback->($stream, $error, $error_code) } if $callback;
     return;
 }
 
@@ -626,8 +624,8 @@ sub _on_stream_close {
     if (!$stream->is_terminal) {
         if ($error_code) {
             my $error = "HTTP/2 stream closed with error $error_code";
-            $stream->_fail($error);
-            $self->_invoke_stream_error($stream, $error);
+            $stream->_fail($error, $error_code, 1);
+            $self->_invoke_stream_error($stream, $error, $error_code);
         }
         else {
             if (!$stream->request->is_complete) {
