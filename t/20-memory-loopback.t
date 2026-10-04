@@ -114,11 +114,23 @@ my $stream = $client->request(
 ok !$request->is_mutable, 'submitted client request metadata is committed';
 
 sub transfer {
-    my ($from, $to) = @_;
+    my ($name, $from, $to, $round) = @_;
     my $moved = 0;
+    my $pass = 0;
 
     while ($from->want_write) {
+        ++$pass;
+        my $backend_before = $from->session->want_write ? 1 : 0;
         my $bytes = $from->output;
+        my $backend_after = $from->session
+            ? ($from->session->want_write ? 1 : 0)
+            : 0;
+
+        diag "$name round=$round pass=$pass bytes=" . length($bytes)
+            . " engine_want=" . ($from->want_write ? 1 : 0)
+            . " backend_before=$backend_before"
+            . " backend_after=$backend_after";
+
         last unless length $bytes;
         $to->input($bytes);
         $moved += length $bytes;
@@ -127,14 +139,21 @@ sub transfer {
     return $moved;
 }
 
-for (1 .. 1000) {
+for my $round (1 .. 1000) {
     my $moved = 0;
-    $moved += transfer($client, $server);
-    $moved += transfer($server, $client);
+    $moved += transfer('client', $client, $server, $round);
+    $moved += transfer('server', $server, $client, $round);
 
     last if $complete;
-    die "in-memory HTTP/2 loopback stalled"
-        unless $moved;
+    if (!$moved) {
+        diag "stall client backend want_read="
+            . ($client->session->want_read ? 1 : 0)
+            . " want_write=" . ($client->session->want_write ? 1 : 0);
+        diag "stall server backend want_read="
+            . ($server->session->want_read ? 1 : 0)
+            . " want_write=" . ($server->session->want_write ? 1 : 0);
+        die "in-memory HTTP/2 loopback stalled";
+    }
 }
 
 ok $complete, 'in-memory HTTP/2 exchange completes';
