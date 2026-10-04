@@ -149,6 +149,14 @@ like $@, qr/server.*enable_push/i,
     'server push-setting validation is explicit';
 
 $ok = eval {
+    $server->update_settings(enable_push => 0);
+    1;
+};
+ok !$ok, 'server rejects ENABLE_PUSH even when value is zero';
+like $@, qr/server.*must not send enable_push/i,
+    'ENABLE_PUSH is enforced as a client-only setting';
+
+$ok = eval {
     $server->update_settings(max_frame_size => 16_383);
     1;
 };
