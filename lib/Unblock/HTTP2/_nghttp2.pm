@@ -86,6 +86,46 @@ sub _submit_request_xs {
     return $self->_submit_request_native($headers, $provider);
 }
 
+sub _submit_request_uniform_xs {
+    my ($self, $view, $body) = @_;
+    my $provider = _body_provider($body);
+    return $self->_submit_request_uniform_native($view, $provider);
+}
+
+sub submit_response_uniform {
+    my ($self, $stream_id, $view, %args) = @_;
+    my $body = delete($args{body});
+    my $data_callback = delete($args{data_callback});
+    delete $args{callback_data};
+    croak 'submit_response_uniform(): unknown options: '
+        . join(', ', sort keys %args)
+        if %args;
+
+    my $provider = defined($data_callback)
+        ? _body_provider($data_callback)
+        : _body_provider($body);
+
+    return $provider
+        ? $self->_submit_response_uniform_streaming_native(
+            $stream_id, $view, $provider,
+        )
+        : $self->_submit_response_uniform_no_body_native(
+            $stream_id, $view,
+        );
+}
+
+sub submit_response_headers_uniform {
+    my ($self, $stream_id, $view, %args) = @_;
+    my $end_stream = delete($args{end_stream}) || 0;
+    croak 'submit_response_headers_uniform(): unknown options: '
+        . join(', ', sort keys %args)
+        if %args;
+
+    return $self->_submit_response_headers_uniform_native(
+        $stream_id, $view, $end_stream ? 1 : 0,
+    );
+}
+
 sub submit_response {
     my ($self, $stream_id, %args) = @_;
     my $status = exists($args{status}) ? delete($args{status}) : 200;
