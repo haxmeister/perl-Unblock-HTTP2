@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP2
 
-0.01  Not yet released
+0.01  2026-10-04
     - Initial release of a standalone, event-loop and operating-system neutral
       HTTP/2 protocol engine.
     - Use Uniform::HTTP 0.04 Request and Response objects directly.
