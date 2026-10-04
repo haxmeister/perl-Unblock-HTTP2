@@ -28,7 +28,9 @@ sub new {
     my ($class, %option) = @_;
 
     my %callbacks;
-    for my $name (qw(on_settings on_settings_ack on_ping on_ping_ack)) {
+    for my $name (qw(
+        on_settings on_settings_ack on_ping on_ping_ack on_invalid_frame
+    )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
         croak "new(): $name must be a coderef"
@@ -97,6 +99,10 @@ sub new {
             on_stream_close => sub {
                 my $self = $weak or return 0;
                 return $self->_on_stream_close(@_);
+            },
+            on_invalid_frame => sub {
+                my $self = $weak or return 0;
+                return $self->_on_invalid_frame(@_);
             },
         },
     );
@@ -358,6 +364,18 @@ sub _status_from_block {
         return $pair->[1] if $pair->[0] eq ':status';
     }
     return;
+}
+
+sub _on_invalid_frame {
+    my ($self, $frame, $lib_error_code) = @_;
+
+    my $copy = ref($frame) eq 'HASH' ? { %$frame } : {};
+    $self->_invoke_control_callback(
+        'on_invalid_frame',
+        $copy,
+        0 + ($lib_error_code || 0),
+    );
+    return 0;
 }
 
 sub _on_frame_recv {
