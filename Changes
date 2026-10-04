@@ -37,6 +37,9 @@ Revision history for Unblock-HTTP2
     - Verify unknown extension frame types are ignored as required by HTTP/2.
     - Stop routing nghttp2's debug-only error callback through public server
       on_error.
+    - Add explicit goaway() control with HTTP/2 error codes, binary debug data,
+      local GOAWAY introspection, and non-increasing last-stream boundaries.
+    - Route drain() through the same GOAWAY control path.
     - Preserve RST_STREAM error codes with public RFC constants,
       Stream->reset(), error_code/error_name/reset_by_peer accessors, and
       reset codes passed through error callbacks for higher-layer retry policy.
