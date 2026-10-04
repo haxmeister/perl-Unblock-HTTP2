@@ -39,9 +39,11 @@ my $complete = 0;
 my @streams;
 
 for my $target ('/one', '/two', '/three') {
+    my $path = $target;
+
     my $request = Uniform::HTTP::Request->new(
         method    => 'GET',
-        target    => $target,
+        target    => $path,
         scheme    => 'https',
         authority => 'example.test',
     );
@@ -51,7 +53,7 @@ for my $target ('/one', '/two', '/three') {
 
         on_body => sub {
             my ($stream, $response, $bytes) = @_;
-            $body{$target} .= $bytes;
+            $body{$path} .= $bytes;
         },
 
         on_complete => sub {
@@ -60,7 +62,7 @@ for my $target ('/one', '/two', '/three') {
 
         on_error => sub {
             my ($stream, $error) = @_;
-            push @errors, "client $target: $error";
+            push @errors, "client $path: $error";
         },
     );
 
