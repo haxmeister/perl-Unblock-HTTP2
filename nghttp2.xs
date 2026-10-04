@@ -296,7 +296,7 @@ headers_to_nva(pTHX_ AV *headers, size_t *count_out)
 
 
 static SV *
-uniform_fast_slot(AV *view, I32 index)
+uniform_fast_slot(pTHX_ AV *view, I32 index)
 {
     SV **svp = av_fetch(view, index, 0);
 
@@ -320,8 +320,8 @@ validate_uniform_fast_view(pTHX_ AV *view, IV expected_kind)
         croak("Uniform::HTTP FastPath view has the wrong number of slots");
     }
 
-    abi_sv = uniform_fast_slot(view, UHFP_SLOT_ABI);
-    kind_sv = uniform_fast_slot(view, UHFP_SLOT_KIND);
+    abi_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_ABI);
+    kind_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_KIND);
     if (!abi_sv || SvROK(abi_sv) || SvIV(abi_sv) != UHFP_ABI_VERSION) {
         croak("unsupported Uniform::HTTP FastPath ABI");
     }
@@ -329,7 +329,7 @@ validate_uniform_fast_view(pTHX_ AV *view, IV expected_kind)
         croak("Uniform::HTTP FastPath view has the wrong message kind");
     }
 
-    version_sv = uniform_fast_slot(view, UHFP_SLOT_VERSION);
+    version_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_VERSION);
     if (version_sv) {
         if (SvROK(version_sv)) {
             croak("Uniform::HTTP FastPath version must be a plain scalar");
@@ -340,7 +340,7 @@ validate_uniform_fast_view(pTHX_ AV *view, IV expected_kind)
         }
     }
 
-    headers_sv = uniform_fast_slot(view, UHFP_SLOT_HEADERS);
+    headers_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_HEADERS);
     if (!headers_sv || !SvROK(headers_sv)
         || SvTYPE(SvRV(headers_sv)) != SVt_PVAV) {
         croak("Uniform::HTTP FastPath headers must be an array reference");
@@ -485,7 +485,7 @@ measure_normal_headers(pTHX_ AV *headers, size_t *name_bytes_out)
 }
 
 static void
-set_nv_from_sv(nghttp2_nv *nv, const char *name, size_t name_len, SV *value_sv)
+set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len, SV *value_sv)
 {
     STRLEN value_len;
     const char *value = SvPVbyte(value_sv, value_len);
@@ -536,11 +536,11 @@ static nghttp2_nv *
 uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
 {
     AV *headers = validate_uniform_fast_view(aTHX_ view, UHFP_KIND_REQUEST);
-    SV *method_sv = uniform_fast_slot(view, UHFP_SLOT_METHOD);
-    SV *target_sv = uniform_fast_slot(view, UHFP_SLOT_TARGET);
-    SV *scheme_sv = uniform_fast_slot(view, UHFP_SLOT_SCHEME);
-    SV *authority_sv = uniform_fast_slot(view, UHFP_SLOT_AUTHORITY);
-    SV *protocol_sv = uniform_fast_slot(view, UHFP_SLOT_PROTOCOL);
+    SV *method_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_METHOD);
+    SV *target_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_TARGET);
+    SV *scheme_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_SCHEME);
+    SV *authority_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_AUTHORITY);
+    SV *protocol_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_PROTOCOL);
     STRLEN method_len;
     STRLEN target_len;
     STRLEN scheme_len = 0;
@@ -637,23 +637,23 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
     }
     name_buffer = (char *)(nva + count);
 
-    set_nv_from_sv(&nva[out++], ":method", 7, method_sv);
+    set_nv_from_sv(aTHX_ &nva[out++], ":method", 7, method_sv);
 
     if (ascii_equal_ci(method, (size_t)method_len, "CONNECT")) {
         if (protocol) {
-            set_nv_from_sv(&nva[out++], ":protocol", 9, protocol_sv);
-            set_nv_from_sv(&nva[out++], ":scheme", 7, scheme_sv);
-            set_nv_from_sv(&nva[out++], ":authority", 10, authority_sv);
-            set_nv_from_sv(&nva[out++], ":path", 5, target_sv);
+            set_nv_from_sv(aTHX_ &nva[out++], ":protocol", 9, protocol_sv);
+            set_nv_from_sv(aTHX_ &nva[out++], ":scheme", 7, scheme_sv);
+            set_nv_from_sv(aTHX_ &nva[out++], ":authority", 10, authority_sv);
+            set_nv_from_sv(aTHX_ &nva[out++], ":path", 5, target_sv);
         }
         else {
-            set_nv_from_sv(&nva[out++], ":authority", 10, authority_sv);
+            set_nv_from_sv(aTHX_ &nva[out++], ":authority", 10, authority_sv);
         }
     }
     else {
-        set_nv_from_sv(&nva[out++], ":scheme", 7, scheme_sv);
-        set_nv_from_sv(&nva[out++], ":authority", 10, authority_sv);
-        set_nv_from_sv(&nva[out++], ":path", 5, target_sv);
+        set_nv_from_sv(aTHX_ &nva[out++], ":scheme", 7, scheme_sv);
+        set_nv_from_sv(aTHX_ &nva[out++], ":authority", 10, authority_sv);
+        set_nv_from_sv(aTHX_ &nva[out++], ":path", 5, target_sv);
     }
 
     append_normal_headers(aTHX_ nva, out, headers, name_buffer);
@@ -665,7 +665,7 @@ static nghttp2_nv *
 uniform_response_to_nva(pTHX_ AV *view, size_t *count_out)
 {
     AV *headers = validate_uniform_fast_view(aTHX_ view, UHFP_KIND_RESPONSE);
-    SV *status_sv = uniform_fast_slot(view, UHFP_SLOT_STATUS);
+    SV *status_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_STATUS);
     STRLEN status_len;
     const char *status;
     IV status_value;
@@ -698,7 +698,7 @@ uniform_response_to_nva(pTHX_ AV *view, size_t *count_out)
     }
     name_buffer = (char *)(nva + count);
 
-    set_nv_from_sv(&nva[0], ":status", 7, status_sv);
+    set_nv_from_sv(aTHX_ &nva[0], ":status", 7, status_sv);
     append_normal_headers(aTHX_ nva, 1, headers, name_buffer);
 
     *count_out = count;
