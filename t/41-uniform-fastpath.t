@@ -31,7 +31,7 @@ my $received_request;
 
 isa_ok $received_request, 'Uniform::HTTP::Request';
 is $received_request->target, '/trusted',
-    'received request uses trusted FastPath construction';
+    'received request uses trusted native construction';
 ok $received_request->is_complete,
     'trusted complete request keeps receive state';
 ok !$received_request->is_mutable,
@@ -55,7 +55,7 @@ my $received_response;
 
 isa_ok $received_response, 'Uniform::HTTP::Response';
 is $received_response->status, 204,
-    'received response uses trusted FastPath construction';
+    'received response uses trusted native construction';
 ok $received_response->is_complete,
     'trusted complete response keeps receive state';
 
@@ -71,7 +71,7 @@ my $subclass = Local::UniformRequest->new(
     authority => 'example.test',
 );
 
-ok !Unblock::HTTP2::_Headers->fast_view($subclass),
+ok !Unblock::HTTP2::_Headers->native_message($subclass),
     'Uniform subclasses stay on the portable contract path';
 is_deeply(
     Unblock::HTTP2::_Headers->request_headers($subclass),
@@ -137,7 +137,7 @@ my $request = Uniform::HTTP::Request->new(
         $request,
         on_response => sub {
             my ($stream, $response) = @_;
-            is $response->status, 200, 'native FastPath response arrives';
+            is $response->status, 200, 'native Uniform path response arrives';
             is $response->header('x-mixed-response'), 'response-value',
                 'native response FastPath lowercases field names for HTTP/2';
         },
@@ -153,7 +153,7 @@ my $request = Uniform::HTTP::Request->new(
     pump_until($client, $server, sub { $done });
 }
 
-ok $done, 'canonical request and response use native FastPath';
-is_deeply \@errors, [], 'FastPath exchange reports no errors';
+ok $done, 'canonical request and response use native Uniform path';
+is_deeply \@errors, [], 'native Uniform exchange reports no errors';
 
 done_testing;
