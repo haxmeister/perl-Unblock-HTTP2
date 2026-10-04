@@ -54,3 +54,9 @@ Revision history for Unblock-HTTP2
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.
+    - Add release packaging metadata, explicit MANIFEST and generated-file
+      ignore rules.
+    - Separate test-only prerequisites from runtime prerequisites.
+    - Add CI distcheck/disttest coverage for the generated CPAN distribution.
+    - Clean README Markdown rendering and add release-facing installation and
+      status information.
