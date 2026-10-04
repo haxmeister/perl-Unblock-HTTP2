@@ -68,7 +68,7 @@ sub new {
 
     my $self = bless {
         draining             => 0,
-        max_active_transactions   => 0 + $max_active_transactions,
+        max_active_transactions => 0 + $max_active_transactions,
         max_header_list_size => 0 + $max_header_list_size,
         receive              => {},
         providers            => {},
@@ -722,7 +722,7 @@ A streaming request body can produce more data.
 
 =back
 
-Set C<stream_body =E<gt> 1> to produce the request body with the Stream
+Set C<stream_body =E<gt> 1> to produce the request body with the Transaction
 C<write()> and C<end()> methods.
 
 =head1 CONNECTION CONTROL
