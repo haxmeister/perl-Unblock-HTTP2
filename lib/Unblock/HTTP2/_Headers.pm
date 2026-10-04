@@ -313,6 +313,9 @@ sub request_headers {
             unless defined($authority) && length($authority);
 
         if (defined $protocol) {
+            croak 'request_headers(): extended CONNECT requires nonempty protocol'
+                unless length($protocol);
+
             my $scheme = $request->scheme;
             croak 'request_headers(): extended CONNECT requires scheme'
                 unless defined($scheme) && length($scheme);
@@ -339,7 +342,10 @@ sub request_headers {
 
         my $scheme = $request->scheme;
         my $authority = $request->authority;
+        my $target = $request->target;
 
+        croak 'request_headers(): HTTP/2 Request requires nonempty path target'
+            unless defined($target) && length($target);
         croak 'request_headers(): HTTP/2 Request requires scheme'
             unless defined($scheme) && length($scheme);
         croak 'request_headers(): HTTP/2 Request requires authority'
@@ -348,7 +354,7 @@ sub request_headers {
         push @block,
             [ ':scheme', $scheme ],
             [ ':authority', $authority ],
-            [ ':path', $request->target ];
+            [ ':path', $target ];
     }
 
     push @block, @{ $class->normal_fields('request_headers()', $request) };
