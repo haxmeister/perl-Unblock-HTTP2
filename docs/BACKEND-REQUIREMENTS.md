@@ -25,6 +25,7 @@ The private binding exposes only the pieces Unblock needs:
 - frame, header, DATA, error, and stream-close callbacks
 - local SETTINGS submission
 - effective remote SETTINGS queries
+- received SETTINGS identifier/value details and ACK flags
 - request and response submission
 - generic HEADERS submission
 - deferred DATA providers and resume
@@ -45,7 +46,10 @@ Unblock uses this to enforce SETTINGS_ENABLE_CONNECT_PROTOCOL before sending
 Extended CONNECT and to combine the local active-stream cap with the peer's
 SETTINGS_MAX_CONCURRENT_STREAMS.
 
-Unblock does not parse SETTINGS frames independently.
+The binding also exposes the identifier/value pairs carried by received
+SETTINGS frames and the normal frame flags. Unblock maps known identifiers to
+portable public setting names, reports peer changes, and tracks outbound
+SETTINGS acknowledgements without exposing raw nghttp2 objects.
 
 ## Receive flow control
 
