@@ -5,9 +5,9 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed);
 
-use Uniform::HTTP::FastPath 0.05 ();
-use Uniform::HTTP::Request 0.05;
-use Uniform::HTTP::Response 0.05;
+use Uniform::HTTP::FastPath 0.06 ();
+use Uniform::HTTP::Request 0.06;
+use Uniform::HTTP::Response 0.06;
 
 our $VERSION = '0.03';
 
@@ -21,10 +21,10 @@ my %FORBIDDEN = map { $_ => 1 } qw(
 
 my $TOKEN_RE = qr/\A[!\#\$%&'*+\-.\^_`|~0-9A-Za-z]+\z/;
 
-sub fast_view {
+sub native_message {
     my ($class, $message) = @_;
     return unless Uniform::HTTP::FastPath::can_view($message);
-    return Uniform::HTTP::FastPath::view($message);
+    return $message;
 }
 
 sub _received_flags {
