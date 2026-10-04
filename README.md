@@ -359,6 +359,19 @@ Unblock does not implement keepalive intervals, deadlines, liveness policy, or
 round-trip timers. Those decisions belong to the caller or higher connection
 policy.
 
+## Fatal engine failures
+
+If libnghttp2 reports a fatal receive or send failure, C<input()> or C<output()>
+still throws so the transport integration cannot miss the failure. The engine
+also closes itself before rethrowing and records the reason:
+
+    $engine->is_closed
+    $engine->close_reason
+
+This prevents a caught backend exception from leaving an HTTP/2 session that
+appears reusable. Explicit C<close($reason)> uses the same retained
+C<close_reason> state.
+
 ## Invalid frames and extension safety
 
 nghttp2 performs HTTP/2 frame and state validation. When it receives an invalid
