@@ -55,7 +55,10 @@ Received HTTP/2 pseudo-headers map as follows:
     :protocol   -> protocol
     :status     -> status
 
-Pseudo-headers are not inserted into the ordinary field list.
+Pseudo-headers are not inserted into the ordinary field list. Both receive
+and send paths enforce the request-shape rules used by the mapping: ordinary
+requests require a nonempty path target, ordinary CONNECT omits scheme/path,
+and Extended CONNECT requires a nonempty protocol, scheme, authority, and path.
 
 Ordinary fields map to Uniform headers. A later HTTP/2 HEADERS block maps to
 the separate Uniform trailer section.
