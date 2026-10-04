@@ -73,6 +73,17 @@ sub end {
     return $self;
 }
 
+sub inform {
+    my ($self, $response) = @_;
+    croak 'inform(): Stream is already terminal' if $self->is_terminal;
+
+    my $connection = $self->{connection}
+        or croak 'inform(): HTTP/2 connection is no longer available';
+
+    $connection->_inform_stream($self, $response);
+    return $self;
+}
+
 sub respond {
     my ($self, $response, %option) = @_;
     croak 'respond(): Stream is already terminal' if $self->is_terminal;
@@ -185,6 +196,7 @@ production. C<write()> returns false when the per-stream cooperative high-water
 mark is reached. The bytes are still accepted; wait for C<on_drain> before
 producing more.
 
-Server streams use C<respond()> to submit a Uniform response.
+Server streams use C<inform()> for non-final informational responses and
+C<respond()> for the final Uniform response.
 
 =cut

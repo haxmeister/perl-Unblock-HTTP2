@@ -166,6 +166,20 @@ Ordinary CONNECT is also represented directly with an authority-form target.
 Incoming request bodies are delivered incrementally with on_body and
 on_request_end callbacks.
 
+A server can send one or more informational responses before the final
+response:
+
+    $stream->inform(
+        Uniform::HTTP::Response->new(
+            status => 103,
+            headers => [
+                [ 'Link', '</style.css>; rel=preload' ],
+            ],
+        ),
+    );
+
+The final response still uses respond().
+
 For a streaming response:
 
     $stream->respond(
@@ -189,6 +203,10 @@ Both client and server engines can begin a graceful HTTP/2 shutdown with:
 This queues GOAWAY and marks the connection as draining. A client will not open
 new request streams after local drain or after receiving peer GOAWAY. Streams
 that were already accepted can continue to completion.
+
+After receiving GOAWAY, peer_goaway() returns the peer's last stream ID, HTTP/2
+error code, and debug data. Unblock exposes those facts but does not decide
+whether a higher layer should retry a request.
 
 The client advertises ENABLE_PUSH = 0 because server push is not currently part
 of the Unblock public API.
@@ -226,8 +244,11 @@ Those belong to the caller or to a higher HTTP client/server layer.
 
 ## Dependencies
 
-Unblock::HTTP2 currently uses Uniform::HTTP 0.04 or newer for HTTP messages and
-Net::HTTP2::nghttp2 0.011 or newer for libnghttp2 bindings.
+Unblock::HTTP2 uses Uniform::HTTP 0.04 or newer for HTTP messages and
+Alien::nghttp2 to provide libnghttp2.
+
+The distribution contains a small private XS binding to libnghttp2. That
+binding is an implementation detail, not a public API.
 
 The intended Perl compatibility floor is Perl 5.16.
 
@@ -237,7 +258,8 @@ The distribution is under active development and has not been released.
 
 The development suite includes complete HTTP/2 client/server exchanges entirely
 in memory, including streaming bodies, multiplexing, cancellation isolation,
-header-list limits, trailers, and Extended CONNECT. No socket, TLS
+header-list limits, trailers, informational responses, peer SETTINGS
+enforcement, GOAWAY details, and Extended CONNECT. No socket, TLS
 implementation, or event loop is involved in those tests.
 
 ## License

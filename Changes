@@ -16,6 +16,12 @@ Revision history for Unblock-HTTP2
     - Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL on the server by default.
     - Add graceful client/server GOAWAY draining while allowing accepted streams
       to finish.
+    - Replace Net::HTTP2::nghttp2 with a small private XS binding to libnghttp2,
+      built through Alien::nghttp2.
+    - Query effective peer SETTINGS for Extended CONNECT and remote stream
+      concurrency enforcement.
+    - Add Stream->inform() for one or more non-final informational Responses.
+    - Preserve received GOAWAY last-stream-id, error code, and debug data.
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.

@@ -57,6 +57,17 @@ sub request_for {
 
     ok $client->draining,
         'client enters draining state after receiving server GOAWAY';
+
+    is_deeply(
+        $client->peer_goaway,
+        {
+            last_stream_id => $stream->id,
+            error_code     => 0,
+            debug_data     => '',
+        },
+        'client retains the complete peer GOAWAY boundary',
+    );
+
     ok !$client->can_open_stream,
         'client refuses new streams after GOAWAY';
 
@@ -99,6 +110,15 @@ sub request_for {
 
     ok $server->draining,
         'server observes peer GOAWAY';
+    is_deeply(
+        $server->peer_goaway,
+        {
+            last_stream_id => 0,
+            error_code     => 0,
+            debug_data     => '',
+        },
+        'server retains peer GOAWAY details',
+    );
     ok !$client->can_open_stream,
         'locally draining client cannot open a request stream';
 }

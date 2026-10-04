@@ -13,19 +13,26 @@ my @informational;
 my $final;
 my @errors;
 
-my $server;
-$server = Unblock::HTTP2::Server->new(
+my $server = Unblock::HTTP2::Server->new(
     on_request => sub {
         my ($stream, $request) = @_;
 
-        # Backend capability probe: if nghttp2 treats a 1xx response as
-        # non-final, Unblock can expose this without extending the binding.
-        $server->{session}->submit_response(
-            $stream->id,
-            status  => 103,
-            headers => [
-                [ 'link', '</style.css>; rel=preload' ],
-            ],
+        $stream->inform(
+            Uniform::HTTP::Response->new(
+                status  => 103,
+                headers => [
+                    [ 'link', '</style.css>; rel=preload' ],
+                ],
+            ),
+        );
+
+        $stream->inform(
+            Uniform::HTTP::Response->new(
+                status  => 103,
+                headers => [
+                    [ 'link', '</script.js>; rel=preload' ],
+                ],
+            ),
         );
 
         $stream->respond(
@@ -70,21 +77,21 @@ my $stream = $client->request(
 
 pump_until($client, $server, sub { $stream->is_terminal });
 
-{
-    local $TODO =
-        'Net::HTTP2::nghttp2 0.011 needs generic non-final HEADERS submission';
-
-    is scalar(@informational), 1,
-        'backend permits one non-final informational response';
-    is @informational ? $informational[0]->status : undef, 103,
-        'informational response status is preserved';
-    is @informational ? $informational[0]->header('link') : undef,
-        '</style.css>; rel=preload',
-        'informational response fields are preserved';
-    is defined($final) ? $final->status : undef, 200,
-        'final response follows informational response';
-    is_deeply \@errors, [],
-        'informational response path reports no protocol errors';
-}
+is scalar(@informational), 2,
+    'multiple non-final informational responses are delivered';
+is $informational[0]->status, 103,
+    'first informational response status is preserved';
+is $informational[0]->header('link'),
+    '</style.css>; rel=preload',
+    'first informational response fields are preserved';
+is $informational[1]->status, 103,
+    'second informational response status is preserved';
+is $informational[1]->header('link'),
+    '</script.js>; rel=preload',
+    'second informational response fields are preserved';
+is defined($final) ? $final->status : undef, 200,
+    'final response follows informational responses';
+is_deeply \@errors, [],
+    'informational response path reports no protocol errors';
 
 done_testing;
