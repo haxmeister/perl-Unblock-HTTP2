@@ -194,6 +194,33 @@ For a streaming response:
     $stream->write($chunk);
     $stream->end;
 
+## Receive-side flow control
+
+Incoming body bytes are automatically credited back to the peer after the body
+callback returns. This keeps simple consumers simple.
+
+A slow consumer can take explicit control for one stream:
+
+    $stream->auto_consume(0);
+
+    on_body => sub {
+        my ($stream, $message, $bytes) = @_;
+        queue_for_later($bytes);
+    };
+
+When the application has actually consumed queued bytes, release exactly that
+credit:
+
+    $stream->consume($bytes_consumed);
+
+C<unconsumed_bytes()> reports delivered body bytes that have not yet been
+released. Re-enable automatic consumption with C<auto_consume(1)>; any
+outstanding stream credit is released immediately.
+
+Unblock keeps connection-level receive credit moving independently, so one slow
+stream can exhaust its own receive window without unnecessarily stalling other
+streams on the same HTTP/2 connection. No timer or transport policy is involved.
+
 ## Graceful draining
 
 Both client and server engines can begin a graceful HTTP/2 shutdown with:
