@@ -279,6 +279,7 @@ The public setting names are:
     max_frame_size
     max_header_list_size
     enable_connect_protocol
+    no_rfc7540_priorities
 
 Read the values currently advertised by this endpoint with local_settings() or
 local_setting($name). Read the peer's effective values with peer_settings() or
@@ -295,8 +296,9 @@ waiting for ACK. Unblock validates the HTTP/2 value ranges and keeps the
 SETTINGS_ENABLE_CONNECT_PROTOCOL transition one-way: once 1 has been sent it
 cannot later be reset to 0.
 
-The client keeps SETTINGS_ENABLE_PUSH at 0 because server push is not part of
-the public Unblock API.
+SETTINGS_ENABLE_PUSH is a client-to-server setting. The client keeps it at 0
+because server push is not part of the public Unblock API, and the server API
+rejects any attempt to send ENABLE_PUSH, including value 0.
 
 ## Modern prioritization
 
