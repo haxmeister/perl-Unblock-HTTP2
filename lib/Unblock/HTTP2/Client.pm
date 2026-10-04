@@ -530,8 +530,8 @@ sub _on_stream_close {
 
     if ($error_code) {
         my $error = "HTTP/2 stream closed with error $error_code";
-        $stream->_fail($error);
-        $self->_invoke_stream_error($stream, $error);
+        $stream->_fail($error, $error_code, 1);
+        $self->_invoke_stream_error($stream, $error, $error_code);
     }
     elsif ($state && $state->{response}) {
         $state->{response}->mark_complete->freeze;
@@ -559,9 +559,9 @@ sub _stream_failure {
     my $stream = $self->stream_for_id($stream_id) or return;
     return if $stream->is_terminal;
 
-    $stream->_fail($error);
+    $stream->_fail($error, $code, 0);
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
-    $self->_invoke_stream_error($stream, $error);
+    $self->_invoke_stream_error($stream, $error, $code);
     return;
 }
 
@@ -604,9 +604,7 @@ sub _respond_stream {
 sub _cancel_stream {
     my ($self, $stream) = @_;
     return if $stream->is_terminal;
-
-    eval { $self->{session}->submit_rst_stream($stream->id, H2_CANCEL) };
-    $stream->_mark_cancelled;
+    $self->_reset_stream($stream, H2_CANCEL);
     return;
 }
 
