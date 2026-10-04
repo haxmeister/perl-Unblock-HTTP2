@@ -356,6 +356,10 @@ frame_to_hv(pTHX_ const nghttp2_frame *frame)
         hv_store(hv, "settings", 8,
             newRV_noinc((SV *)settings_av), 0);
     }
+    else if (frame->hd.type == NGHTTP2_PING) {
+        hv_store(hv, "opaque_data", 11,
+            newSVpvn((const char *)frame->ping.opaque_data, 8), 0);
+    }
     else if (frame->hd.type == NGHTTP2_GOAWAY) {
         hv_store(hv, "last_stream_id", 14,
             newSViv(frame->goaway.last_stream_id), 0);
@@ -1232,6 +1236,31 @@ submit_rst_stream(self, stream_id, error_code)
             ps->session, NGHTTP2_FLAG_NONE, stream_id, error_code);
         if (rv != 0) {
             croak("nghttp2_submit_rst_stream failed (%d): %s",
+                rv, nghttp2_strerror(rv));
+        }
+        RETVAL = rv;
+    OUTPUT:
+        RETVAL
+
+int
+_submit_ping_native(self, opaque_data)
+        SV *self
+        SV *opaque_data
+    PREINIT:
+        unblock_h2_session *ps;
+        STRLEN len = 0;
+        const uint8_t *data;
+        int rv;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        data = (const uint8_t *)SvPVbyte(opaque_data, len);
+        if (len != 8) {
+            croak("PING opaque data must be exactly 8 bytes");
+        }
+        rv = nghttp2_submit_ping(
+            ps->session, NGHTTP2_FLAG_NONE, data);
+        if (rv != 0) {
+            croak("nghttp2_submit_ping failed (%d): %s",
                 rv, nghttp2_strerror(rv));
         }
         RETVAL = rv;
