@@ -57,4 +57,7 @@ jobs:
 
       - name: Check POD syntax
         run: |
-          find lib -name '*.pm' -print0 | xargs -0 -n1 podchecker
+          podchecker lib/Unblock/HTTP2.pm
+          podchecker lib/Unblock/HTTP2/Client.pm
+          podchecker lib/Unblock/HTTP2/Server.pm
+          podchecker lib/Unblock/HTTP2/Stream.pm
