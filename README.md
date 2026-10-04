@@ -180,6 +180,19 @@ For a streaming response:
     $stream->write($chunk);
     $stream->end;
 
+## Graceful draining
+
+Both client and server engines can begin a graceful HTTP/2 shutdown with:
+
+    $engine->drain;
+
+This queues GOAWAY and marks the connection as draining. A client will not open
+new request streams after local drain or after receiving peer GOAWAY. Streams
+that were already accepted can continue to completion.
+
+The client advertises ENABLE_PUSH = 0 because server push is not currently part
+of the Unblock public API.
+
 ## What Unblock::HTTP2 owns
 
 - HTTP/2 client and server sessions
