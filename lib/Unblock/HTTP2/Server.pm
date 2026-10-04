@@ -30,7 +30,7 @@ sub new {
     my %callbacks;
     for my $name (qw(
         on_request on_body on_request_end on_error
-        on_settings on_settings_ack on_ping on_ping_ack
+        on_settings on_settings_ack on_ping on_ping_ack on_priority
     )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
@@ -132,6 +132,7 @@ sub new {
         max_concurrent_streams  => $self->{max_concurrent_streams},
         max_header_list_size    => $self->{max_header_list_size},
         enable_connect_protocol => $self->{enable_connect_protocol},
+        no_rfc7540_priorities   => 1,
         %$settings,
     );
     $self->_submit_settings('new()', \%initial_settings);
@@ -222,6 +223,7 @@ sub _on_frame_recv {
 
     return 0 if $self->_handle_settings_frame($frame);
     return 0 if $self->_handle_ping_frame($frame);
+    return 0 if $self->_handle_priority_update_frame($frame);
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
