@@ -1,0 +1,126 @@
+name: fastpath-benchmark
+
+on:
+  push:
+    branches:
+      - feature/uniform-http-fastpath
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out FastPath branch
+        uses: actions/checkout@v4
+
+      - name: Check out released baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 681b434e9af4335a72b052ee9ad18c33260655d5
+          path: baseline
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: latest
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev pkg-config
+          cpanm --notest Alien::nghttp2
+          cpanm --notest Uniform::HTTP@0.05
+
+      - name: Build released baseline
+        shell: bash
+        run: |
+          cd baseline
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Build FastPath branch
+        shell: bash
+        run: |
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Run alternating benchmark samples
+        shell: bash
+        run: |
+          : > benchmark-results.txt
+
+          run_baseline() {
+            BENCH_LABEL=baseline \
+            PERL5LIB="$PWD/baseline/blib/lib:$PWD/baseline/blib/arch:$PERL5LIB" \
+              perl xt/benchmark-uniform-fastpath.pl | tee -a benchmark-results.txt
+          }
+
+          run_fastpath() {
+            BENCH_LABEL=fastpath \
+            PERL5LIB="$PWD/blib/lib:$PWD/blib/arch:$PERL5LIB" \
+              perl xt/benchmark-uniform-fastpath.pl | tee -a benchmark-results.txt
+          }
+
+          for round in $(seq 1 7); do
+            if [ $((round % 2)) -eq 1 ]; then
+              run_baseline
+              run_fastpath
+            else
+              run_fastpath
+              run_baseline
+            fi
+          done
+
+      - name: Summarize benchmark
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import statistics
+          from pathlib import Path
+
+          rows = []
+          for line in Path("benchmark-results.txt").read_text().splitlines():
+              if not line.startswith("RESULT "):
+                  continue
+              fields = dict(item.split("=", 1) for item in line.split()[1:])
+              rows.append({
+                  "label": fields["label"],
+                  "path": fields["path"],
+                  "mode": fields["mode"],
+                  "rate": float(fields["rate"]),
+                  "seconds": float(fields["seconds"]),
+              })
+
+          print("\nBENCHMARK SUMMARY")
+          print("=================")
+          grouped = {}
+          for row in rows:
+              grouped.setdefault((row["label"], row["mode"]), []).append(row["rate"])
+
+          medians = {}
+          for key in sorted(grouped):
+              values = grouped[key]
+              med = statistics.median(values)
+              mean = statistics.mean(values)
+              stdev = statistics.stdev(values) if len(values) > 1 else 0.0
+              medians[key] = med
+              print(
+                  f"{key[0]:8s} {key[1]:8s} "
+                  f"median={med:,.1f}/s mean={mean:,.1f}/s "
+                  f"stdev={stdev:,.1f} samples={len(values)}"
+              )
+
+          for mode in ("submit", "loopback"):
+              base = medians[("baseline", mode)]
+              fast = medians[("fastpath", mode)]
+              change = (fast / base - 1.0) * 100.0
+              ratio = fast / base
+              print(
+                  f"CHANGE {mode}: {change:+.2f}% "
+                  f"({ratio:.3f}x, {base:,.1f}/s -> {fast:,.1f}/s)"
+              )
+          PY
