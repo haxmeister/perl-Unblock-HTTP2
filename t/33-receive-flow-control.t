@@ -50,9 +50,9 @@ my $server = Unblock::HTTP2::Server->new(
 my $client = Unblock::HTTP2::Client->new;
 pump_until_idle($client, $server);
 
-$server->{session}->submit_settings({
+$server->update_settings(
     initial_window_size => 1024,
-});
+);
 pump_until_idle($client, $server);
 
 my %client_complete;
@@ -171,9 +171,9 @@ my $response_server = Unblock::HTTP2::Server->new(
 my $response_client = Unblock::HTTP2::Client->new;
 pump_until_idle($response_client, $response_server);
 
-$response_client->{session}->submit_settings({
+$response_client->update_settings(
     initial_window_size => 1024,
-});
+);
 pump_until_idle($response_client, $response_server);
 
 $slow_client_stream = $response_client->request(
