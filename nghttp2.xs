@@ -1836,7 +1836,7 @@ configure_callbacks(pTHX_ nghttp2_session_callbacks **callbacks_out)
 }
 
 static unblock_h2_session *
-new_session(pTHX_ HV *callbacks_hv, int server)
+new_session(pTHX_ HV *callbacks_hv, int server, size_t max_header_list_size)
 {
     unblock_h2_session *ps;
     uhttp_native_api uniform_api;
@@ -1853,10 +1853,13 @@ new_session(pTHX_ HV *callbacks_hv, int server)
         croak("unable to allocate HTTP/2 session");
     }
     ps->uniform_api = uniform_api;
+    ps->server = server ? 1 : 0;
+    ps->max_header_list_size = max_header_list_size;
 
     load_callbacks(aTHX_ ps, callbacks_hv);
     rv = configure_callbacks(aTHX_ &callbacks);
     if (rv != 0) {
+        free_header_blocks(ps);
         release_callbacks(aTHX_ ps);
         free(ps);
         croak("nghttp2_session_callbacks_new failed (%d): %s",
@@ -1920,26 +1923,36 @@ version_string()
 MODULE = Unblock::HTTP2    PACKAGE = Unblock::HTTP2::_nghttp2::Session
 
 SV *
-_new_client_xs(class, callbacks_hv)
+_new_client_xs(class, callbacks_hv, max_header_list_size)
         char *class
         HV *callbacks_hv
+        UV max_header_list_size
     PREINIT:
         unblock_h2_session *ps;
     CODE:
-        ps = new_session(aTHX_ callbacks_hv, 0);
+        if (max_header_list_size == 0) {
+            croak("max_header_list_size must be positive");
+        }
+        ps = new_session(
+            aTHX_ callbacks_hv, 0, (size_t)max_header_list_size);
         RETVAL = newSV(0);
         sv_setref_pv(RETVAL, class, (void *)ps);
     OUTPUT:
         RETVAL
 
 SV *
-_new_server_xs(class, callbacks_hv)
+_new_server_xs(class, callbacks_hv, max_header_list_size)
         char *class
         HV *callbacks_hv
+        UV max_header_list_size
     PREINIT:
         unblock_h2_session *ps;
     CODE:
-        ps = new_session(aTHX_ callbacks_hv, 1);
+        if (max_header_list_size == 0) {
+            croak("max_header_list_size must be positive");
+        }
+        ps = new_session(
+            aTHX_ callbacks_hv, 1, (size_t)max_header_list_size);
         RETVAL = newSV(0);
         sv_setref_pv(RETVAL, class, (void *)ps);
     OUTPUT:
@@ -1973,6 +1986,7 @@ DESTROY(self)
             free_provider(aTHX_ provider);
             provider = next;
         }
+        free_header_blocks(ps);
         release_callbacks(aTHX_ ps);
         free(ps);
         sv_setiv(SvRV(self), 0);
