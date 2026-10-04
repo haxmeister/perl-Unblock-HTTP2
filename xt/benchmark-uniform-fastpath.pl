@@ -102,7 +102,7 @@ my $server = Unblock::HTTP2::Server->new(
 );
 
 my $client = Unblock::HTTP2::Client->new(
-    max_active_streams => 128,
+    max_active_transactions => 128,
 );
 
 sub transfer {
