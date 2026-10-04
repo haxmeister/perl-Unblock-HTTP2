@@ -24,7 +24,8 @@ are transported.
 
 HTTP messages use L<Uniform::HTTP::Request> and L<Uniform::HTTP::Response>.
 HTTP/2 framing, HPACK, stream state, SETTINGS, GOAWAY, and flow control are
-provided by L<Net::HTTP2::nghttp2> and libnghttp2.
+provided by libnghttp2 through a small private XS binding contained in this
+distribution. The binding is not public API.
 
 =head1 MODULES
 
