@@ -213,8 +213,8 @@ credit:
 
     $stream->consume($bytes_consumed);
 
-C<unconsumed_bytes()> reports delivered body bytes that have not yet been
-released. Re-enable automatic consumption with C<auto_consume(1)>; any
+`unconsumed_bytes()` reports delivered body bytes that have not yet been
+released. Re-enable automatic consumption with `auto_consume(1)`; any
 outstanding stream credit is released immediately.
 
 Unblock keeps connection-level receive credit moving independently, so one slow
