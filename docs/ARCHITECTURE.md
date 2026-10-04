@@ -132,6 +132,20 @@ when end() is called.
 Incoming trailing HEADERS are validated as ordinary HTTP/2 fields, added to the
 Uniform trailer section, then frozen before message completion is reported.
 
+## Graceful draining
+
+Client and Server expose drain() as the graceful connection-shutdown operation.
+It submits GOAWAY and prevents new locally initiated client streams while
+letting streams already accepted by the peer finish normally.
+
+The server remembers the highest peer-initiated request stream it has seen and
+uses that value when initiating GOAWAY. The client advertises ENABLE_PUSH = 0,
+so its locally initiated GOAWAY can use last-stream-id zero without pretending
+to support server-initiated push streams.
+
+Received GOAWAY also places the engine in draining state. Retry policy for work
+the peer did not process remains above this engine.
+
 ## Reentrancy
 
 input() drives nghttp2_session_mem_recv.
