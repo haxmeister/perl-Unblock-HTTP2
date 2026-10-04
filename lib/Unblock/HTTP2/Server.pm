@@ -36,10 +36,12 @@ sub new {
         $callbacks{$name} = $callback if $callback;
     }
 
-    my $max_concurrent_streams =
-        delete($option{max_concurrent_streams}) || 100;
-    my $max_header_list_size =
-        delete($option{max_header_list_size}) || 65_536;
+    my $max_concurrent_streams = exists($option{max_concurrent_streams})
+        ? delete($option{max_concurrent_streams})
+        : 100;
+    my $max_header_list_size = exists($option{max_header_list_size})
+        ? delete($option{max_header_list_size})
+        : 65_536;
 
     croak 'new(): max_concurrent_streams must be a positive integer'
         unless defined($max_concurrent_streams)
@@ -302,7 +304,14 @@ sub _respond_stream {
         croak 'respond(): immutable Response must already have version 2';
     }
 
-    my $stream_body = delete($option{stream_body}) ? 1 : 0;
+    my $stream_body = exists($option{stream_body})
+        ? delete($option{stream_body})
+        : 0;
+    croak 'respond(): stream_body must be zero or one'
+        if !defined($stream_body) || ref($stream_body)
+            || "$stream_body" !~ /\A[01]\z/;
+    $stream_body = $stream_body ? 1 : 0;
+
     my $on_drain = delete $option{on_drain};
     my $on_error = delete $option{on_error};
 
