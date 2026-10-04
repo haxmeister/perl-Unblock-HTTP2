@@ -28,13 +28,22 @@ sub new {
     my ($class, %option) = @_;
 
     my %callbacks;
-    for my $name (qw(on_request on_body on_request_end on_error)) {
+    for my $name (qw(
+        on_request on_body on_request_end on_error
+        on_settings on_settings_ack
+    )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
         croak "new(): $name must be a coderef"
             if defined($callback) && ref($callback) ne 'CODE';
         $callbacks{$name} = $callback if $callback;
     }
+
+    my $settings = exists($option{settings})
+        ? delete($option{settings})
+        : {};
+    croak 'new(): settings must be a hash reference'
+        unless ref($settings) eq 'HASH';
 
     my $max_concurrent_streams = exists($option{max_concurrent_streams})
         ? delete($option{max_concurrent_streams})
@@ -113,13 +122,19 @@ sub new {
         },
     );
 
-    $self->_initialize_connection($session);
+    $self->_initialize_connection(
+        $session,
+        role      => 'server',
+        callbacks => \%callbacks,
+    );
 
-    $session->send_connection_preface(
+    my %initial_settings = (
         max_concurrent_streams  => $self->{max_concurrent_streams},
         max_header_list_size    => $self->{max_header_list_size},
         enable_connect_protocol => $self->{enable_connect_protocol},
+        %$settings,
     );
+    $self->_submit_settings('new()', \%initial_settings);
 
     return $self;
 }
@@ -204,6 +219,8 @@ sub _on_header {
 
 sub _on_frame_recv {
     my ($self, $frame) = @_;
+
+    return 0 if $self->_handle_settings_frame($frame);
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
