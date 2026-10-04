@@ -13,15 +13,15 @@ sub _new {
     my ($class, %args) = @_;
 
     my $connection = delete $args{connection};
-    my $id         = delete $args{id};
+    my $stream_id  = delete $args{stream_id};
     my $request    = delete $args{request};
     my $callbacks  = delete($args{callbacks}) || {};
 
     croak 'Transaction requires a connection object'
         unless blessed($connection);
-    croak 'Transaction id must be a positive integer'
-        unless defined($id) && !ref($id)
-            && $id =~ /\A[0-9]+\z/ && $id > 0;
+    croak 'Transaction stream id must be a positive integer'
+        unless defined($stream_id) && !ref($stream_id)
+            && $stream_id =~ /\A[0-9]+\z/ && $stream_id > 0;
     croak 'Transaction callbacks must be a hash reference'
         unless ref($callbacks) eq 'HASH';
     croak 'unknown Transaction option: ' . join(', ', sort keys %args)
@@ -29,7 +29,7 @@ sub _new {
 
     my $self = bless {
         connection => $connection,
-        id         => 0 + $id,
+        stream_id  => 0 + $stream_id,
         request    => $request,
         response   => undef,
         callbacks        => { %$callbacks },
@@ -45,8 +45,7 @@ sub _new {
     return $self;
 }
 
-sub stream_id    { return $_[0]{id} }
-sub id           { return $_[0]{id} } # compatibility alias
+sub stream_id    { return $_[0]{stream_id} }
 sub request      { return $_[0]{request} }
 sub response     { return $_[0]{response} }
 sub state        { return $_[0]{state} }
@@ -288,11 +287,12 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP2::Transaction - one HTTP/2 stream
+Unblock::HTTP2::Transaction - one HTTP/2 request/response transaction
 
 =head1 DESCRIPTION
 
-A Transaction represents one multiplexed HTTP/2 request/response exchange.
+A Transaction represents one HTTP request/response exchange carried by one
+multiplexed HTTP/2 stream.
 
 C<request()> returns the Uniform request. C<response()> returns the Uniform
 response once one is available.
@@ -359,10 +359,8 @@ Useful state accessors include:
     is_cancelled
     is_terminal
 
-HTTP/2 half-close is preserved. One direction may finish before the full Transaction
-becomes terminal.
-
-C<id()> is retained as a compatibility alias for C<stream_id()>.
+HTTP/2 half-close is preserved. One direction may finish before the full
+Transaction becomes terminal.
 
 =head1 SEE ALSO
 

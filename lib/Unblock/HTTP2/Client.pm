@@ -44,17 +44,17 @@ sub new {
     croak 'new(): settings must be a hash reference'
         unless ref($settings) eq 'HASH';
 
-    my $max_active_streams = exists($option{max_active_streams})
-        ? delete($option{max_active_streams})
+    my $max_active_transactions = exists($option{max_active_transactions})
+        ? delete($option{max_active_transactions})
         : 100;
     my $max_header_list_size = exists($option{max_header_list_size})
         ? delete($option{max_header_list_size})
         : 65_536;
 
-    croak 'new(): max_active_streams must be a positive integer'
-        unless defined($max_active_streams) && !ref($max_active_streams)
-            && $max_active_streams =~ /\A[0-9]+\z/
-            && $max_active_streams > 0;
+    croak 'new(): max_active_transactions must be a positive integer'
+        unless defined($max_active_transactions) && !ref($max_active_transactions)
+            && $max_active_transactions =~ /\A[0-9]+\z/
+            && $max_active_transactions > 0;
     croak 'new(): max_header_list_size must be a positive integer'
         unless defined($max_header_list_size) && !ref($max_header_list_size)
             && $max_header_list_size =~ /\A[0-9]+\z/
@@ -68,7 +68,7 @@ sub new {
 
     my $self = bless {
         draining             => 0,
-        max_active_streams   => 0 + $max_active_streams,
+        max_active_transactions   => 0 + $max_active_transactions,
         max_header_list_size => 0 + $max_header_list_size,
         receive              => {},
         providers            => {},
@@ -145,16 +145,11 @@ sub can_open_transaction {
     my ($self) = @_;
     return 0 if $self->is_closed || $self->{draining};
 
-    my $limit = $self->{max_active_streams};
+    my $limit = $self->{max_active_transactions};
     my $peer_limit = $self->peer_setting('max_concurrent_streams');
     $limit = $peer_limit if $peer_limit < $limit;
 
     return $self->transaction_count < $limit ? 1 : 0;
-}
-
-sub can_open_stream {
-    my ($self) = @_;
-    return $self->can_open_transaction;
 }
 
 sub request {
@@ -242,14 +237,14 @@ sub request {
         ? $self->{session}->_submit_request_uniform_xs($fast_view, $body)
         : $self->{session}->_submit_request_xs($block, $body);
 
-    my $stream = Unblock::HTTP2::Transaction->_new(
+    my $transaction = Unblock::HTTP2::Transaction->_new(
         connection => $self,
-        id         => $stream_id,
+        stream_id  => $stream_id,
         request    => $request,
         callbacks  => \%callbacks,
     );
 
-    $self->_register_stream($stream);
+    $self->_register_transaction($transaction);
     $self->{receive}{$stream_id} = {
         header_block          => [],
         trailer_block         => [],
@@ -265,7 +260,7 @@ sub request {
         $self->{providers}{$stream_id} = $provider;
     }
 
-    return $stream;
+    return $transaction;
 }
 sub _provide_body {
     my ($self, $provider, $stream_id, $max_length) = @_;
@@ -404,7 +399,7 @@ sub _on_frame_recv {
     my $state = $self->{receive}{$stream_id} or return 0;
     return 0 if $state->{header_limit_exceeded};
 
-    my $stream = $self->transaction_for_stream_id($stream_id) or return 0;
+    my $transaction = $self->transaction_for_stream_id($stream_id) or return 0;
 
     if (($frame->{type} // -1) == H2_HEADERS) {
         if (!$state->{response}) {
@@ -423,7 +418,7 @@ sub _on_frame_recv {
                     return 0;
                 }
 
-                my $result = $stream->_invoke(
+                my $result = $transaction->_invoke(
                     'on_informational', $response,
                 );
                 $self->_stream_failure($stream_id, "$result")
@@ -445,9 +440,9 @@ sub _on_frame_recv {
             }
 
             $state->{response} = $response;
-            $stream->_set_response($response);
+            $transaction->_set_response($response);
 
-            my $result = $stream->_invoke('on_response', $response);
+            my $result = $transaction->_invoke('on_response', $response);
             if ($result ne '1') {
                 $self->_stream_failure($stream_id, "$result");
                 return 0;
@@ -494,7 +489,7 @@ sub _on_frame_recv {
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $state = $self->{receive}{$stream_id} or return 0;
-    my $stream = $self->transaction_for_stream_id($stream_id) or return 0;
+    my $transaction = $self->transaction_for_stream_id($stream_id) or return 0;
     my $response = $state->{response};
 
     if (!$response) {
@@ -505,15 +500,15 @@ sub _on_data_chunk_recv {
         return 0;
     }
 
-    $stream->_receive_body_bytes(length $data);
+    $transaction->_receive_body_bytes(length $data);
 
-    my $result = $stream->_invoke('on_body', $response, $data);
+    my $result = $transaction->_invoke('on_body', $response, $data);
     if ($result ne '1') {
         $self->_stream_failure($stream_id, "$result");
         return 0;
     }
 
-    $stream->_auto_consume_body;
+    $transaction->_auto_consume_body;
     return 0;
 }
 
@@ -522,7 +517,7 @@ sub _finish_response {
     my $state = $self->{receive}{$stream_id} or return;
     return if $state->{response_done}++;
 
-    my $stream = $self->transaction_for_stream_id($stream_id) or return;
+    my $transaction = $self->transaction_for_stream_id($stream_id) or return;
     my $response = $state->{response};
 
     if (!$response) {
@@ -535,8 +530,8 @@ sub _finish_response {
 
     $response->mark_complete->freeze;
 
-    my $result = $stream->_invoke('on_complete');
-    $self->_invoke_stream_error($stream, "$result")
+    my $result = $transaction->_invoke('on_complete');
+    $self->_invoke_stream_error($transaction, "$result")
         unless $result eq '1';
     return;
 }
@@ -545,27 +540,27 @@ sub _on_stream_close {
     my $state = delete $self->{receive}{$stream_id};
     delete $self->{providers}{$stream_id};
 
-    my $stream = $self->_remove_stream($stream_id) or return 0;
-    return 0 if $stream->is_terminal;
+    my $transaction = $self->_remove_transaction($stream_id) or return 0;
+    return 0 if $transaction->is_terminal;
 
     if ($error_code) {
         my $error = "HTTP/2 stream closed with error $error_code";
-        $stream->_fail($error, $error_code, 1);
-        $self->_invoke_stream_error($stream, $error, $error_code);
+        $transaction->_fail($error, $error_code, 1);
+        $self->_invoke_stream_error($transaction, $error, $error_code);
     }
     elsif ($state && $state->{response}) {
         $state->{response}->mark_complete->freeze;
         if (!$state->{response_done}) {
-            my $result = $stream->_invoke('on_complete');
-            $self->_invoke_stream_error($stream, "$result")
+            my $result = $transaction->_invoke('on_complete');
+            $self->_invoke_stream_error($transaction, "$result")
                 unless $result eq '1';
         }
-        $stream->_mark_complete;
+        $transaction->_mark_complete;
     }
     else {
         my $error = 'HTTP/2 stream closed before final Response';
-        $stream->_fail($error);
-        $self->_invoke_stream_error($stream, $error);
+        $transaction->_fail($error);
+        $self->_invoke_stream_error($transaction, $error);
     }
 
     return 0;
@@ -576,19 +571,19 @@ sub _stream_failure {
     $error = 'HTTP/2 stream failure'
         unless defined($error) && length($error);
 
-    my $stream = $self->transaction_for_stream_id($stream_id) or return;
-    return if $stream->is_terminal;
+    my $transaction = $self->transaction_for_stream_id($stream_id) or return;
+    return if $transaction->is_terminal;
 
-    $stream->_fail($error, $code, 0);
+    $transaction->_fail($error, $code, 0);
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
-    $self->_invoke_stream_error($stream, $error, $code);
+    $self->_invoke_stream_error($transaction, $error, $code);
     return;
 }
 
 sub _write_stream_body {
-    my ($self, $stream, $bytes, $final, $operation) = @_;
+    my ($self, $transaction, $bytes, $final, $operation) = @_;
 
-    my $provider = $self->{providers}{ $stream->stream_id }
+    my $provider = $self->{providers}{ $transaction->stream_id }
         or croak "$operation(): Stream has no streaming Request body";
 
     $bytes = $self->_body_bytes("$operation()", $bytes);
@@ -599,14 +594,14 @@ sub _write_stream_body {
 
     if ($final) {
         my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
-            "$operation()", $stream->request,
+            "$operation()", $transaction->request,
         );
         $provider->{trailers} = $trailers if @$trailers;
         $provider->{eof} = 1;
     }
 
-    if ($self->{session}->is_stream_deferred($stream->stream_id)) {
-        $self->{session}->resume_stream($stream->stream_id);
+    if ($self->{session}->is_stream_deferred($transaction->stream_id)) {
+        $self->{session}->resume_stream($transaction->stream_id);
     }
 
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
@@ -622,9 +617,9 @@ sub _respond_stream {
 }
 
 sub _cancel_stream {
-    my ($self, $stream) = @_;
-    return if $stream->is_terminal;
-    $self->_reset_stream($stream, H2_CANCEL);
+    my ($self, $transaction) = @_;
+    return if $transaction->is_terminal;
+    $self->_reset_stream($transaction, H2_CANCEL);
     return;
 }
 
@@ -686,7 +681,7 @@ Many request Streams can be active at once.
 
 =head1 CONSTRUCTOR
 
-C<new()> accepts an initial C<settings> hash, C<max_active_streams>, and
+C<new()> accepts an initial C<settings> hash, C<max_active_transactions>, and
 C<max_header_list_size>.
 
 Connection callbacks include C<on_settings>, C<on_settings_ack>, C<on_ping>,
@@ -757,7 +752,7 @@ The Client also exposes the common connection methods:
     close
 
 C<can_open_transaction()> reports whether another local request transaction can be
-opened. C<can_open_stream()> remains as a compatibility alias.
+opened.
 
 =head1 SEE ALSO
 

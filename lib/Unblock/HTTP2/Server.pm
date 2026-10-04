@@ -239,9 +239,9 @@ sub _on_frame_recv {
     return 0 if $state->{header_limit_exceeded};
 
     if (($frame->{type} // -1) == H2_HEADERS) {
-        my $stream = $self->transaction_for_stream_id($stream_id);
+        my $transaction = $self->transaction_for_stream_id($stream_id);
 
-        if (!$stream) {
+        if (!$transaction) {
             my $request = eval {
                 Unblock::HTTP2::_Headers->request_from_headers(
                     $state->{header_block},
@@ -255,16 +255,16 @@ sub _on_frame_recv {
                 return 0;
             }
 
-            $stream = Unblock::HTTP2::Transaction->_new(
+            $transaction = Unblock::HTTP2::Transaction->_new(
                 connection => $self,
-                id         => $stream_id,
+                stream_id  => $stream_id,
                 request    => $request,
                 callbacks  => {},
             );
-            $self->_register_stream($stream);
+            $self->_register_transaction($transaction);
 
             my $result = $self->_invoke_callback(
-                'on_request', $stream, $request,
+                'on_request', $transaction, $request,
             );
             if ($result ne '1') {
                 $self->_stream_failure($stream_id, "$result");
@@ -288,7 +288,7 @@ sub _on_frame_recv {
 
         my $ok = eval {
             Unblock::HTTP2::_Headers->apply_trailers(
-                $stream->request,
+                $transaction->request,
                 $state->{trailer_block},
             );
             1;
@@ -311,12 +311,12 @@ sub _on_frame_recv {
 }
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
-    my $stream = $self->transaction_for_stream_id($stream_id) or return 0;
+    my $transaction = $self->transaction_for_stream_id($stream_id) or return 0;
 
-    $stream->_receive_body_bytes(length $data);
+    $transaction->_receive_body_bytes(length $data);
 
     my $result = $self->_invoke_callback(
-        'on_body', $stream, $stream->request, $data,
+        'on_body', $transaction, $transaction->request, $data,
     );
 
     if ($result ne '1') {
@@ -324,7 +324,7 @@ sub _on_data_chunk_recv {
         return 0;
     }
 
-    $stream->_auto_consume_body;
+    $transaction->_auto_consume_body;
     return 0;
 }
 
@@ -333,11 +333,11 @@ sub _request_end {
     my $state = $self->{receive}{$stream_id} or return;
     return if $state->{request_end_called}++;
 
-    my $stream = $self->transaction_for_stream_id($stream_id) or return;
-    $stream->request->mark_complete->freeze;
+    my $transaction = $self->transaction_for_stream_id($stream_id) or return;
+    $transaction->request->mark_complete->freeze;
 
     my $result = $self->_invoke_callback(
-        'on_request_end', $stream, $stream->request,
+        'on_request_end', $transaction, $transaction->request,
     );
     $self->_stream_failure($stream_id, "$result")
         unless $result eq '1';
@@ -368,14 +368,14 @@ sub _on_invalid_frame {
 }
 
 sub _inform_stream {
-    my ($self, $stream, $response) = @_;
+    my ($self, $transaction, $response) = @_;
 
     my $fast_view = Unblock::HTTP2::_Headers->fast_view($response);
     croak 'inform(): requires the Uniform HTTP response contract'
         unless $fast_view
             || Unblock::HTTP2::_Headers::_response_contract($response);
     croak 'inform(): final Response already submitted'
-        if $stream->response;
+        if $transaction->response;
 
     my $status = $response->status;
     croak 'inform(): status must be informational (100-199, excluding 101)'
@@ -393,30 +393,30 @@ sub _inform_stream {
 
     if ($fast_view) {
         $self->{session}->submit_response_headers_uniform(
-            $stream->stream_id,
+            $transaction->stream_id,
             $fast_view,
         );
     }
     else {
         my $block = Unblock::HTTP2::_Headers->response_headers($response);
         $self->{session}->submit_headers(
-            $stream->stream_id,
+            $transaction->stream_id,
             headers => $block,
         );
     }
 
-    return $stream;
+    return $transaction;
 }
 
 sub _respond_stream {
-    my ($self, $stream, $response, %option) = @_;
+    my ($self, $transaction, $response, %option) = @_;
 
     my $fast_view = Unblock::HTTP2::_Headers->fast_view($response);
     croak 'respond(): requires the Uniform HTTP response contract'
         unless $fast_view
             || Unblock::HTTP2::_Headers::_response_contract($response);
     croak 'respond(): Stream already has a Response'
-        if $stream->response;
+        if $transaction->response;
 
     my $stream_body = exists($option{stream_body})
         ? delete($option{stream_body})
@@ -455,7 +455,7 @@ sub _respond_stream {
             queue             => '',
             eof               => 0,
             blocked           => 0,
-            stream_id         => $stream->stream_id,
+            stream_id         => $transaction->stream_id,
             trailers          => undef,
             trailer_submitted => 0,
         };
@@ -478,14 +478,14 @@ sub _respond_stream {
 
         if ($fast_view) {
             $self->{session}->submit_response_uniform(
-                $stream->stream_id,
+                $transaction->stream_id,
                 $fast_view,
                 data_callback => $data_callback,
             );
         }
         else {
             $self->{session}->submit_response(
-                $stream->stream_id,
+                $transaction->stream_id,
                 status        => $response->status,
                 headers       => \@headers,
                 data_callback => $data_callback,
@@ -495,14 +495,14 @@ sub _respond_stream {
     elsif ($response->has_buffered_body) {
         if ($fast_view) {
             $self->{session}->submit_response_uniform(
-                $stream->stream_id,
+                $transaction->stream_id,
                 $fast_view,
                 body => $response->body,
             );
         }
         else {
             $self->{session}->submit_response(
-                $stream->stream_id,
+                $transaction->stream_id,
                 status  => $response->status,
                 headers => \@headers,
                 body    => $response->body,
@@ -512,28 +512,28 @@ sub _respond_stream {
     else {
         if ($fast_view) {
             $self->{session}->submit_response_uniform(
-                $stream->stream_id,
+                $transaction->stream_id,
                 $fast_view,
             );
         }
         else {
             $self->{session}->submit_response(
-                $stream->stream_id,
+                $transaction->stream_id,
                 status  => $response->status,
                 headers => \@headers,
             );
         }
     }
 
-    $stream->_set_response($response);
-    $stream->_set_callback('on_drain', $on_drain) if $on_drain;
-    $stream->_set_callback('on_error', $on_error) if $on_error;
+    $transaction->_set_response($response);
+    $transaction->_set_callback('on_drain', $on_drain) if $on_drain;
+    $transaction->_set_callback('on_error', $on_error) if $on_error;
 
     if ($provider) {
-        $self->{providers}{ $stream->stream_id } = $provider;
+        $self->{providers}{ $transaction->stream_id } = $provider;
     }
 
-    return $stream;
+    return $transaction;
 }
 sub _provide_body {
     my ($self, $provider, $stream_id, $max_length) = @_;
@@ -586,9 +586,9 @@ sub _submit_provider_trailers {
     return;
 }
 sub _write_stream_body {
-    my ($self, $stream, $bytes, $final, $operation) = @_;
+    my ($self, $transaction, $bytes, $final, $operation) = @_;
 
-    my $provider = $self->{providers}{ $stream->stream_id }
+    my $provider = $self->{providers}{ $transaction->stream_id }
         or croak "$operation(): Stream has no streaming Response body";
 
     $bytes = $self->_body_bytes("$operation()", $bytes);
@@ -599,14 +599,14 @@ sub _write_stream_body {
 
     if ($final) {
         my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
-            "$operation()", $stream->response,
+            "$operation()", $transaction->response,
         );
         $provider->{trailers} = $trailers if @$trailers;
         $provider->{eof} = 1;
     }
 
-    if ($self->{session}->is_stream_deferred($stream->stream_id)) {
-        $self->{session}->resume_stream($stream->stream_id);
+    if ($self->{session}->is_stream_deferred($transaction->stream_id)) {
+        $self->{session}->resume_stream($transaction->stream_id);
     }
 
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
@@ -614,9 +614,9 @@ sub _write_stream_body {
     return $blocked ? 0 : 1;
 }
 sub _cancel_stream {
-    my ($self, $stream) = @_;
-    return if $stream->is_terminal;
-    $self->_reset_stream($stream, H2_CANCEL);
+    my ($self, $transaction) = @_;
+    return if $transaction->is_terminal;
+    $self->_reset_stream($transaction, H2_CANCEL);
     return;
 }
 
@@ -626,11 +626,11 @@ sub _stream_failure {
     $error = 'HTTP/2 stream failure'
         unless defined($error) && length($error);
 
-    my $stream = $self->transaction_for_stream_id($stream_id);
+    my $transaction = $self->transaction_for_stream_id($stream_id);
 
-    if ($stream && !$stream->is_terminal) {
-        $stream->_fail($error, $code, 0);
-        $self->_invoke_stream_error($stream, $error, $code);
+    if ($transaction && !$transaction->is_terminal) {
+        $transaction->_fail($error, $code, 0);
+        $self->_invoke_stream_error($transaction, $error, $code);
     }
     elsif (my $callback = $self->{callbacks}{on_error}) {
         eval { $callback->(undef, $error, $code) };
@@ -641,17 +641,17 @@ sub _stream_failure {
 }
 
 sub _invoke_stream_error {
-    my ($self, $stream, $error, $error_code) = @_;
+    my ($self, $transaction, $error, $error_code) = @_;
 
-    my $result = $stream->_invoke('on_error', $error, $error_code);
+    my $result = $transaction->_invoke('on_error', $error, $error_code);
     if ($result ne '1') {
         my $callback = $self->{callbacks}{on_error};
-        eval { $callback->($stream, "$result", $error_code) } if $callback;
+        eval { $callback->($transaction, "$result", $error_code) } if $callback;
         return;
     }
 
     my $callback = $self->{callbacks}{on_error};
-    eval { $callback->($stream, $error, $error_code) } if $callback;
+    eval { $callback->($transaction, $error, $error_code) } if $callback;
     return;
 }
 
@@ -660,19 +660,19 @@ sub _on_stream_close {
     delete $self->{receive}{$stream_id};
     delete $self->{providers}{$stream_id};
 
-    my $stream = $self->_remove_stream($stream_id) or return 0;
+    my $transaction = $self->_remove_transaction($stream_id) or return 0;
 
-    if (!$stream->is_terminal) {
+    if (!$transaction->is_terminal) {
         if ($error_code) {
             my $error = "HTTP/2 stream closed with error $error_code";
-            $stream->_fail($error, $error_code, 1);
-            $self->_invoke_stream_error($stream, $error, $error_code);
+            $transaction->_fail($error, $error_code, 1);
+            $self->_invoke_stream_error($transaction, $error, $error_code);
         }
         else {
-            if (!$stream->request->is_complete) {
-                $stream->request->mark_complete->freeze;
+            if (!$transaction->request->is_complete) {
+                $transaction->request->mark_complete->freeze;
             }
-            $stream->_mark_complete;
+            $transaction->_mark_complete;
         }
     }
 

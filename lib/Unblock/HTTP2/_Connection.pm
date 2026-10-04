@@ -52,7 +52,7 @@ sub _initialize_connection {
     $self->{session}          = $session;
     $self->{role}             = $role;
     $self->{callbacks}        = $callbacks;
-    $self->{streams}          = {};
+    $self->{transactions}          = {};
     $self->{closed}           = 0;
     $self->{close_reason}      = undef;
     $self->{in_session_call}  = 0;
@@ -79,19 +79,9 @@ sub transaction_count {
     return scalar keys %{ $_[0]{streams} };
 }
 
-sub stream_count {
-    my ($self) = @_;
-    return $self->transaction_count;
-}
-
 sub transaction_for_stream_id {
     my ($self, $stream_id) = @_;
-    return $self->{streams}{$stream_id};
-}
-
-sub stream_for_id {
-    my ($self, $stream_id) = @_;
-    return $self->transaction_for_stream_id($stream_id);
+    return $self->{transactions}{$stream_id};
 }
 
 sub want_read {
@@ -176,16 +166,16 @@ sub output {
     return $bytes;
 }
 
-sub _register_stream {
-    my ($self, $stream) = @_;
-    $self->{streams}{ $stream->stream_id } = $stream;
-    return $stream;
+sub _register_transaction {
+    my ($self, $transaction) = @_;
+    $self->{transactions}{ $transaction->stream_id } = $transaction;
+    return $transaction;
 }
 
-sub _remove_stream {
+sub _remove_transaction {
     my ($self, $stream_id) = @_;
     delete $self->{pending_drain}{$stream_id};
-    return delete $self->{streams}{$stream_id};
+    return delete $self->{transactions}{$stream_id};
 }
 
 sub _queue_drain {
@@ -195,7 +185,7 @@ sub _queue_drain {
 }
 
 sub _reset_stream {
-    my ($self, $stream, $error_code) = @_;
+    my ($self, $transaction, $error_code) = @_;
 
     croak 'reset(): connection is closed'
         if $self->{closed} || !$self->{session};
@@ -204,19 +194,19 @@ sub _reset_stream {
             && "$error_code" =~ /\A[0-9]+\z/
             && $error_code <= 4_294_967_295;
 
-    $self->{session}->submit_rst_stream($stream->stream_id, 0 + $error_code);
-    $stream->_mark_cancelled(0 + $error_code, 0);
+    $self->{session}->submit_rst_stream($transaction->stream_id, 0 + $error_code);
+    $transaction->_mark_cancelled(0 + $error_code, 0);
     return;
 }
 
 sub _consume_stream_body {
-    my ($self, $stream, $bytes) = @_;
+    my ($self, $transaction, $bytes) = @_;
 
     croak 'consume(): connection is closed'
         if $self->{closed} || !$self->{session};
     return unless $bytes;
 
-    $self->{session}->consume_stream($stream->stream_id, $bytes);
+    $self->{session}->consume_stream($transaction->stream_id, $bytes);
     return;
 }
 
@@ -313,7 +303,7 @@ sub _handle_ping_frame {
 }
 
 sub _update_stream_priority {
-    my ($self, $stream, $field_value) = @_;
+    my ($self, $transaction, $field_value) = @_;
 
     croak 'update_priority(): connection is closed'
         if $self->{closed} || !$self->{session};
@@ -328,7 +318,7 @@ sub _update_stream_priority {
     croak 'update_priority(): peer has not enabled RFC 9218 priorities'
         unless $enabled == 1;
 
-    $self->{session}->submit_priority_update($stream->stream_id, $bytes);
+    $self->{session}->submit_priority_update($transaction->stream_id, $bytes);
     return;
 }
 
@@ -576,10 +566,10 @@ sub _after_session_call {
     $self->{pending_drain} = {};
 
     for my $stream_id (@ids) {
-        my $stream = $self->{streams}{$stream_id} or next;
-        next if $stream->is_terminal;
+        my $transaction = $self->{transactions}{$stream_id} or next;
+        next if $transaction->is_terminal;
 
-        my $result = $stream->_drain;
+        my $result = $transaction->_drain;
         next if $result && $result eq '1';
 
         if ($result && $result ne '1') {
@@ -627,21 +617,21 @@ sub _finish_close {
     $self->{closed} = 1;
     $self->{close_reason} = "$error";
 
-    for my $stream (values %{ $self->{streams} }) {
-        next if $stream->is_terminal;
-        $stream->_fail($error);
-        $self->_invoke_stream_error($stream, $error);
+    for my $transaction (values %{ $self->{transactions} }) {
+        next if $transaction->is_terminal;
+        $transaction->_fail($error);
+        $self->_invoke_stream_error($transaction, $error);
     }
 
-    $self->{streams} = {};
+    $self->{transactions} = {};
     $self->{pending_drain} = {};
     $self->{session} = undef;
     return $self;
 }
 
 sub _invoke_stream_error {
-    my ($self, $stream, $error, $error_code) = @_;
-    my $result = $stream->_invoke('on_error', $error, $error_code);
+    my ($self, $transaction, $error, $error_code) = @_;
+    my $result = $transaction->_invoke('on_error', $error, $error_code);
     return $result;
 }
 
