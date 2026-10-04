@@ -20,7 +20,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y             libnghttp2-dev             nghttp2-client             nghttp2-server             pkg-config
+          sudo apt-get install -y libnghttp2-dev nghttp2-client nghttp2-server pkg-config
 
       - name: Install dependencies
         shell: bash
@@ -43,11 +43,12 @@ jobs:
           printf 'nghttpd-one\n' > .interop-root/one.txt
           printf 'nghttpd-two\n' > .interop-root/two.txt
 
-          nghttpd --no-tls -a 127.0.0.1 -d "$PWD/.interop-root" 18080             > .interop-nghttpd.log 2>&1 &
+          nghttpd --no-tls -a 127.0.0.1 -d "$PWD/.interop-root" 18080 > .interop-nghttpd.log 2>&1 &
           NGHTTPD_PID=$!
           trap 'kill "$NGHTTPD_PID" 2>/dev/null || true' EXIT
 
-          UNBLOCK_HTTP2_INTEROP=1           UNBLOCK_HTTP2_NGHTTPD_HOST=127.0.0.1           UNBLOCK_HTTP2_NGHTTPD_PORT=18080             prove -b xt/interop-nghttpd.t
+          env UNBLOCK_HTTP2_INTEROP=1 UNBLOCK_HTTP2_NGHTTPD_HOST=127.0.0.1 UNBLOCK_HTTP2_NGHTTPD_PORT=18080 \
+            prove -b xt/interop-nghttpd.t
 
           kill "$NGHTTPD_PID"
           wait "$NGHTTPD_PID" || true
@@ -58,8 +59,10 @@ jobs:
         run: |
           rm -f .interop-ready
 
-          UNBLOCK_HTTP2_SERVER_HOST=127.0.0.1           UNBLOCK_HTTP2_SERVER_PORT=18081           UNBLOCK_HTTP2_READY_FILE="$PWD/.interop-ready"             perl -Mblib xt/interop-server.pl             > .interop-server.log 2>&1 &
+          env UNBLOCK_HTTP2_SERVER_HOST=127.0.0.1 UNBLOCK_HTTP2_SERVER_PORT=18081 UNBLOCK_HTTP2_READY_FILE="$PWD/.interop-ready" \
+            perl -Mblib xt/interop-server.pl > .interop-server.log 2>&1 &
           SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
           for attempt in $(seq 1 50); do
             test -f .interop-ready && break
@@ -71,6 +74,7 @@ jobs:
           nghttp -v -t 5 http://127.0.0.1:18081/ > .interop-nghttp.log 2>&1
 
           wait "$SERVER_PID"
+          trap - EXIT
 
           grep -F 'unblock-server-ok' .interop-nghttp.log
           grep -F ':status: 200' .interop-nghttp.log
