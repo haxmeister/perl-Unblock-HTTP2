@@ -26,15 +26,16 @@ WriteMakefile(
     LICENSE          => 'mit',
     MIN_PERL_VERSION => '5.016',
 
-    PREREQ_PM => {
-        'Carp'                  => 0,
-        'Net::HTTP2::nghttp2'   => '0.011',
-        'Scalar::Util'          => 0,
-        'Uniform::HTTP'         => '0.03',
+    CONFIGURE_REQUIRES => {
+        'ExtUtils::MakeMaker' => '6.64',
     },
 
-    TEST_REQUIRES => {
-        'Test::More' => 0,
+    PREREQ_PM => {
+        'Carp'                => 0,
+        'Net::HTTP2::nghttp2' => '0.011',
+        'Scalar::Util'        => 0,
+        'Test::More'          => 0,
+        'Uniform::HTTP'       => '0.03',
     },
 
     META_MERGE => {
