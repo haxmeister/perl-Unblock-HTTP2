@@ -60,6 +60,7 @@ sub _initialize_connection {
     $self->{local_settings}   = {};
     $self->{peer_settings}    = {};
     $self->{settings_pending} = [];
+    $self->{local_goaway}      = undef;
 
     $self->_refresh_peer_settings;
     return $self;
@@ -185,6 +186,66 @@ sub _consume_stream_body {
 
     $self->{session}->consume_stream($stream->id, $bytes);
     return;
+}
+
+sub local_goaway {
+    my ($self) = @_;
+    return unless $self->{local_goaway};
+    return { %{ $self->{local_goaway} } };
+}
+
+sub goaway {
+    my ($self, %option) = @_;
+
+    croak 'goaway(): connection is closed'
+        if $self->{closed} || !$self->{session};
+
+    my $error_code = exists($option{error_code})
+        ? delete($option{error_code})
+        : 0;
+    croak 'goaway(): error code must be an unsigned 32-bit integer'
+        unless defined($error_code) && !ref($error_code)
+            && "$error_code" =~ /\A[0-9]+\z/
+            && $error_code <= 4_294_967_295;
+
+    my $last_stream_id = exists($option{last_stream_id})
+        ? delete($option{last_stream_id})
+        : $self->{role} eq 'server'
+            ? 0 + ($self->{last_peer_stream_id} || 0)
+            : 0;
+
+    croak 'goaway(): last_stream_id must be in the HTTP/2 31-bit range'
+        unless defined($last_stream_id) && !ref($last_stream_id)
+            && "$last_stream_id" =~ /\A[0-9]+\z/
+            && $last_stream_id <= 2_147_483_647;
+
+    my $debug_data = exists($option{debug_data})
+        ? delete($option{debug_data})
+        : '';
+    $debug_data = $self->_body_bytes('goaway()', $debug_data);
+
+    croak 'goaway(): unknown options: ' . join(', ', sort keys %option)
+        if %option;
+
+    if ($self->{local_goaway}
+        && $last_stream_id > $self->{local_goaway}{last_stream_id}) {
+        croak 'goaway(): last_stream_id cannot increase across GOAWAY frames';
+    }
+
+    $self->{session}->submit_goaway(
+        last_stream_id => 0 + $last_stream_id,
+        error_code     => 0 + $error_code,
+        debug_data     => $debug_data,
+    );
+
+    $self->{local_goaway} = {
+        last_stream_id => 0 + $last_stream_id,
+        error_code     => 0 + $error_code,
+        debug_data     => $debug_data,
+    };
+    $self->{draining} = 1 if exists $self->{draining};
+
+    return $self;
 }
 
 sub ping {
