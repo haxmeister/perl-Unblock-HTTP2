@@ -23,7 +23,7 @@ t/21-streaming-loopback.t
 t/22-multiplex.t
 t/23-cancellation-isolation.t
 t/24-header-list-limit.t
-t/25-uniform-http-005.t
+t/25-uniform-http-006.t
 t/26-extended-connect-setting.t
 t/27-informational-probe.t
 t/28-goaway-drain.t
