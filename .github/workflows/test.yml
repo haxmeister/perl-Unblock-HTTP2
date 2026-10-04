@@ -38,6 +38,7 @@ jobs:
       - name: Build and install Uniform
         run: |
           cd _uniform_http
+          cpanm --notest Crypt::SysRandom
           cpanm --notest --installdeps .
           perl Makefile.PL
           make
