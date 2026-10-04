@@ -453,6 +453,9 @@ sub _stream_failure {
         $stream->_fail($error);
         $self->_invoke_stream_error($stream, $error);
     }
+    elsif (my $callback = $self->{callbacks}{on_error}) {
+        eval { $callback->(undef, $error) };
+    }
 
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
     return;
