@@ -20,12 +20,7 @@ sub _initialize_connection {
     $self->{in_session_call} = 0;
     $self->{close_pending}   = undef;
     $self->{pending_drain}   = {};
-    $self->{output_pending}  = 0;
     return $self;
-}
-
-sub session {
-    return $_[0]{session};
 }
 
 sub is_closed {
@@ -50,14 +45,7 @@ sub want_read {
 sub want_write {
     my ($self) = @_;
     return 0 if $self->{closed} || !$self->{session};
-    return $self->{output_pending} ? 1 : 0;
-}
-
-sub _mark_output_pending {
-    my ($self) = @_;
-    $self->{output_pending} = 1
-        unless $self->{closed};
-    return;
+    return $self->{session}->want_write ? 1 : 0;
 }
 
 sub input {
@@ -83,7 +71,6 @@ sub input {
         return $consumed;
     }
 
-    $self->_mark_output_pending;
     $self->_after_session_call;
     return $consumed;
 }
@@ -95,7 +82,7 @@ sub output {
     croak 'output(): cannot be called from an HTTP/2 session callback'
         if $self->{in_session_call};
 
-    return '' unless $self->{output_pending};
+    return '' unless $self->{session}->want_write;
 
     my $bytes;
     {
@@ -109,13 +96,6 @@ sub output {
     }
 
     $bytes = '' unless defined $bytes;
-
-    # One nghttp2 send pass can make additional output eligible only after the
-    # bytes from that pass have been serialized. Keep the engine writable after
-    # every non-empty result and clear readiness only when a later probe is
-    # empty. This avoids tying the portable host contract to backend scheduling
-    # details.
-    $self->{output_pending} = length($bytes) ? 1 : 0;
 
     $self->_after_session_call;
     return $bytes;
