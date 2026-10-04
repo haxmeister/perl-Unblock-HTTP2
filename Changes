@@ -27,6 +27,8 @@ Revision history for Unblock-HTTP2
     - Add a public SETTINGS control plane with initial configuration, effective
       peer/local views, later updates, peer-change notifications, ACK tracking,
       RFC value validation, and no private nghttp2 session access.
+    - Add connection-level PING with exact eight-byte opaque payloads, distinct
+      PING/PING-ACK callbacks, automatic protocol ACKs, and no keepalive policy.
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.
