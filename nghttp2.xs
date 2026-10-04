@@ -243,7 +243,7 @@ add_provider(pTHX_ unblock_h2_session *ps, unblock_h2_provider *provider)
 }
 
 static void
-free_header_block(unblock_h2_header_block *block)
+free_header_block(pTHX_ unblock_h2_header_block *block)
 {
     size_t i;
 
@@ -291,30 +291,30 @@ take_header_block(unblock_h2_session *ps, int32_t stream_id)
 }
 
 static void
-remove_header_block(unblock_h2_session *ps, int32_t stream_id)
+remove_header_block(pTHX_ unblock_h2_session *ps, int32_t stream_id)
 {
-    free_header_block(take_header_block(ps, stream_id));
+    free_header_block(aTHX_ take_header_block(ps, stream_id));
 }
 
 static void
-free_header_blocks(unblock_h2_session *ps)
+free_header_blocks(pTHX_ unblock_h2_session *ps)
 {
     unblock_h2_header_block *block = ps->header_blocks;
 
     ps->header_blocks = NULL;
     while (block) {
         unblock_h2_header_block *next = block->next;
-        free_header_block(block);
+        free_header_block(aTHX_ block);
         block = next;
     }
 }
 
 static int
-start_header_block(unblock_h2_session *ps, const nghttp2_frame *frame)
+start_header_block(pTHX_ unblock_h2_session *ps, const nghttp2_frame *frame)
 {
     unblock_h2_header_block *block;
 
-    remove_header_block(ps, frame->hd.stream_id);
+    remove_header_block(aTHX_ ps, frame->hd.stream_id);
 
     block = (unblock_h2_header_block *)calloc(1, sizeof(*block));
     if (!block) {
@@ -330,7 +330,7 @@ start_header_block(unblock_h2_session *ps, const nghttp2_frame *frame)
 }
 
 static int
-append_header_field(unblock_h2_session *ps,
+append_header_field(pTHX_ unblock_h2_session *ps,
                     unblock_h2_header_block *block,
                     const uint8_t *name, size_t namelen,
                     const uint8_t *value, size_t valuelen)
@@ -1615,7 +1615,7 @@ on_begin_headers_callback(nghttp2_session *session,
     }
 
     if (frame->hd.type == NGHTTP2_HEADERS
-        && !start_header_block(ps, frame)) {
+        && !start_header_block(aTHX_ ps, frame)) {
         if (!ps->callback_error) {
             ps->callback_error = newSVpv(
                 "unable to allocate HTTP/2 receive header block", 0);
@@ -1650,7 +1650,7 @@ on_header_callback(nghttp2_session *session,
     }
 
     if (!append_header_field(
-            ps, block, name, namelen, value, valuelen)) {
+            aTHX_ ps, block, name, namelen, value, valuelen)) {
         if (!ps->callback_error) {
             ps->callback_error = newSVpv(
                 "unable to allocate HTTP/2 receive header field", 0);
@@ -1678,7 +1678,7 @@ on_frame_recv_callback(nghttp2_session *session,
     }
 
     if (!ps->cb_frame_recv) {
-        free_header_block(block);
+        free_header_block(aTHX_ block);
         return 0;
     }
 
@@ -1687,7 +1687,7 @@ on_frame_recv_callback(nghttp2_session *session,
         attach_native_header_result(
             aTHX_ ps, frame, frame_hv, block);
     }
-    free_header_block(block);
+    free_header_block(aTHX_ block);
 
     args = newAV();
     av_push(args, newRV_noinc((SV *)frame_hv));
@@ -1746,7 +1746,7 @@ on_stream_close_callback(nghttp2_session *session,
     int result = 0;
 
     remove_provider(aTHX_ ps, stream_id);
-    remove_header_block(ps, stream_id);
+    remove_header_block(aTHX_ ps, stream_id);
 
     if (!ps->cb_stream_close) {
         return 0;
@@ -1878,7 +1878,7 @@ new_session(pTHX_ HV *callbacks_hv, int server, size_t max_header_list_size)
     load_callbacks(aTHX_ ps, callbacks_hv);
     rv = configure_callbacks(aTHX_ &callbacks);
     if (rv != 0) {
-        free_header_blocks(ps);
+        free_header_blocks(aTHX_ ps);
         release_callbacks(aTHX_ ps);
         free(ps);
         croak("nghttp2_session_callbacks_new failed (%d): %s",
@@ -2005,7 +2005,7 @@ DESTROY(self)
             free_provider(aTHX_ provider);
             provider = next;
         }
-        free_header_blocks(ps);
+        free_header_blocks(aTHX_ ps);
         release_callbacks(aTHX_ ps);
         free(ps);
         sv_setiv(SvRV(self), 0);
