@@ -77,6 +77,14 @@ jobs:
           perl Makefile.PL
           perl -MConfig -e 'system($Config{make}, "test"); exit($? >> 8)'
 
+      - name: Check distribution and disttest
+        if: runner.os == 'Linux' && matrix.perl == 'latest'
+        shell: bash
+        run: |
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE" distcheck
+          "$MAKE" disttest
+
       - name: Check POD syntax
         if: runner.os != 'Windows'
         shell: bash
