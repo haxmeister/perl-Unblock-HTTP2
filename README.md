@@ -196,16 +196,16 @@ For a streaming response:
 
 ## Stream resets and error codes
 
-C<cancel()> remains the simple way to cancel a stream. It sends the standard
-C<CANCEL> RST_STREAM code.
+`cancel()` remains the simple way to cancel a stream. It sends the standard
+`CANCEL` RST_STREAM code.
 
 For explicit protocol reasons, use:
 
     $stream->reset(Unblock::HTTP2::REFUSED_STREAM());
 
 Known HTTP/2 error codes are public package constants on Unblock::HTTP2,
-including C<NO_ERROR>, C<PROTOCOL_ERROR>, C<FLOW_CONTROL_ERROR>,
-C<REFUSED_STREAM>, and C<CANCEL>.
+including `NO_ERROR`, `PROTOCOL_ERROR`, `FLOW_CONTROL_ERROR`,
+`REFUSED_STREAM`, and `CANCEL`.
 
 When a stream is reset, the Stream preserves:
 
@@ -213,7 +213,7 @@ When a stream is reset, the Stream preserves:
     $stream->error_name
     $stream->reset_by_peer
 
-C<reset_by_peer> distinguishes a received RST_STREAM from one initiated by the
+`reset_by_peer` distinguishes a received RST_STREAM from one initiated by the
 local application. Error callbacks also receive the numeric HTTP/2 error code
 as an additional argument when one exists. This lets higher layers implement
 retry policy without Unblock deciding which requests should be retried.
@@ -363,7 +363,7 @@ policy.
 
 ## Fatal engine failures
 
-If libnghttp2 reports a fatal receive or send failure, C<input()> or C<output()>
+If libnghttp2 reports a fatal receive or send failure, `input()` or `output()`
 still throws so the transport integration cannot miss the failure. The engine
 also closes itself before rethrowing and records the reason:
 
@@ -371,8 +371,8 @@ also closes itself before rethrowing and records the reason:
     $engine->close_reason
 
 This prevents a caught backend exception from leaving an HTTP/2 session that
-appears reusable. Explicit C<close($reason)> uses the same retained
-C<close_reason> state.
+appears reusable. Explicit `close($reason)` uses the same retained
+`close_reason` state.
 
 ## Invalid frames and extension safety
 
@@ -416,11 +416,11 @@ For an explicit protocol shutdown reason, use:
 
 Server GOAWAY defaults to the highest peer request stream already observed.
 Client GOAWAY defaults to stream zero because server push is disabled.
-C<last_stream_id> can be supplied explicitly when an application needs a
+`last_stream_id` can be supplied explicitly when an application needs a
 narrower boundary. A later GOAWAY may keep or lower that boundary but cannot
 increase it.
 
-C<local_goaway()> returns a copy of the most recently submitted boundary,
+`local_goaway()` returns a copy of the most recently submitted boundary,
 error code, and debug bytes.
 
 After receiving GOAWAY, peer_goaway() returns the peer's last stream ID, HTTP/2
