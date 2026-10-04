@@ -74,11 +74,13 @@ and freezes the message.
 Outgoing application messages remain application-owned. Unblock does not
 rewrite them merely to stamp an HTTP version onto the object.
 
-## Streams
+## Transactions and streams
 
-One `Unblock::HTTP2::Stream` represents one HTTP/2 stream.
+One `Unblock::HTTP2::Transaction` represents one HTTP request/response exchange carried by one HTTP/2 stream.
+The Transaction exposes that protocol identifier as `stream_id()`. Internal
+nghttp2 state and RFC-defined controls continue to use stream terminology.
 
-A Stream tracks:
+A Transaction tracks:
 
 - stream ID
 - request
@@ -88,7 +90,7 @@ A Stream tracks:
 - reset information
 - terminal state
 
-Many Streams can be active on one Client or Server connection.
+Many Transactions can be active on one Client or Server connection.
 
 HTTP/2 half-close is preserved. One direction may finish while the other
 direction remains open.
@@ -111,10 +113,10 @@ the producer to pause until `on_drain` runs.
 
 Incoming body bytes are automatically consumed after the body callback returns.
 
-A Stream can disable that behavior with:
+A Transaction can disable that behavior with:
 
 ```perl
-$stream->auto_consume(0);
+$transaction->auto_consume(0);
 ```
 
 The application then returns stream-level flow-control credit with
@@ -182,7 +184,7 @@ dependency-tree priority model is not exposed.
 
 `reset($error_code)` sends an explicit RST_STREAM reason.
 
-Received reset codes are preserved on the Stream together with whether the
+Received reset codes are preserved on the Transaction together with whether the
 reset came from the peer.
 
 Fatal libnghttp2 input or output failures close the engine and preserve

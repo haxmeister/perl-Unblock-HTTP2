@@ -15,6 +15,7 @@ my @public_modules = qw(
     Unblock::HTTP2
     Unblock::HTTP2::Client
     Unblock::HTTP2::Server
+    Unblock::HTTP2::Transaction
     Unblock::HTTP2::Stream
 );
 

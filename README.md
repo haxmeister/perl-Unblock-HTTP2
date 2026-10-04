@@ -54,10 +54,17 @@ The public API is built around three objects:
 
 - `Unblock::HTTP2::Client` - one client HTTP/2 connection
 - `Unblock::HTTP2::Server` - one server HTTP/2 connection
-- `Unblock::HTTP2::Stream` - one multiplexed request/response stream
+- `Unblock::HTTP2::Transaction` - one request/response transaction carried by an HTTP/2 stream
 
 HTTP messages are normal `Uniform::HTTP::Request` and
 `Uniform::HTTP::Response` objects.
+
+The application-facing exchange object is a `Transaction`. HTTP/2 protocol
+terms such as stream ID, RST_STREAM, stream flow control, and
+MAX_CONCURRENT_STREAMS keep their RFC names.
+
+The old `Unblock::HTTP2::Stream` class and the old helper names remain
+available as compatibility aliases.
 
 Canonical Uniform::HTTP 0.05 messages use its native FastPath ABI. Uniform
 subclasses and framework adapters continue to use the portable message API.
@@ -84,7 +91,7 @@ use Unblock::HTTP2::Client;
 
 my $client = Unblock::HTTP2::Client->new;
 
-my $stream = $client->request(
+my $transaction = $client->request(
     Uniform::HTTP::Request->new(
         method    => 'GET',
         target    => '/',
@@ -93,23 +100,23 @@ my $stream = $client->request(
     ),
 
     on_response => sub {
-        my ($stream, $response) = @_;
+        my ($transaction, $response) = @_;
         print $response->status, "\n";
     },
 
     on_body => sub {
-        my ($stream, $response, $bytes) = @_;
+        my ($transaction, $response, $bytes) = @_;
         process_bytes($bytes);
     },
 
     on_complete => sub {
-        my ($stream) = @_;
+        my ($transaction) = @_;
         print "done\n";
     },
 );
 ```
 
-Many streams can be active on one Client at the same time.
+Many transactions can be active on one Client at the same time. Each is carried by an HTTP/2 stream.
 
 ## Server
 
@@ -119,9 +126,9 @@ use Unblock::HTTP2::Server;
 
 my $server = Unblock::HTTP2::Server->new(
     on_request => sub {
-        my ($stream, $request) = @_;
+        my ($transaction, $request) = @_;
 
-        $stream->respond(
+        $transaction->respond(
             Uniform::HTTP::Response->new(
                 status => 200,
                 body   => "hello\n",
@@ -142,17 +149,17 @@ Buffered bodies can live directly on the Uniform message object.
 For a streaming local body:
 
 ```perl
-my $stream = $client->request(
+my $transaction = $client->request(
     $request,
     stream_body => 1,
     on_drain => sub {
-        my ($stream) = @_;
-        produce_more($stream);
+        my ($transaction) = @_;
+        produce_more($transaction);
     },
 );
 
-$stream->write($chunk);
-$stream->end($last_chunk);
+$transaction->write($chunk);
+$transaction->end($last_chunk);
 ```
 
 The same `write()` and `end()` API is used for a streaming server response.
@@ -164,8 +171,8 @@ Incoming body bytes are automatically credited back to the peer after the body
 callback returns. A slow consumer can take manual flow-control ownership with:
 
 ```perl
-$stream->auto_consume(0);
-$stream->consume($bytes_processed);
+$transaction->auto_consume(0);
+$transaction->consume($bytes_processed);
 ```
 
 ## Trailers and informational responses
@@ -176,13 +183,13 @@ Unblock sends them as HTTP/2 trailing HEADERS.
 A server can send an informational response before the final response:
 
 ```perl
-$stream->inform(
+$transaction->inform(
     Uniform::HTTP::Response->new(
         status => 103,
     ),
 );
 
-$stream->respond($final_response);
+$transaction->respond($final_response);
 ```
 
 ## CONNECT
@@ -227,18 +234,18 @@ $engine->goaway(
 
 Received GOAWAY details are available through `peer_goaway()`.
 
-A Stream can be cancelled or reset explicitly:
+A Transaction can be cancelled or reset explicitly:
 
 ```perl
-$stream->cancel;
+$transaction->cancel;
 
-$stream->reset(
+$transaction->reset(
     Unblock::HTTP2::REFUSED_STREAM(),
 );
 ```
 
 Reset error codes and whether the reset came from the peer are preserved on the
-Stream.
+Transaction.
 
 RFC 9218 extensible priorities are supported. The old RFC 7540 dependency-tree
 priority model is intentionally not part of the public API.
@@ -307,7 +314,7 @@ included in the CPAN distribution.
 
 - `Unblock::HTTP2::Client` - client connection API
 - `Unblock::HTTP2::Server` - server connection API
-- `Unblock::HTTP2::Stream` - per-stream API
+- `Unblock::HTTP2::Transaction` - per-transaction API
 - `docs/ARCHITECTURE.md` - ownership and data flow
 - `docs/FEATURE-COMPLETENESS.md` - release scope and deliberate exclusions
 - `docs/BACKEND-REQUIREMENTS.md` - private libnghttp2 binding contract
