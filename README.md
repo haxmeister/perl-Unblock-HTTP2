@@ -63,9 +63,6 @@ The application-facing exchange object is a `Transaction`. HTTP/2 protocol
 terms such as stream ID, RST_STREAM, stream flow control, and
 MAX_CONCURRENT_STREAMS keep their RFC names.
 
-The old `Unblock::HTTP2::Stream` class and the old helper names remain
-available as compatibility aliases.
-
 Canonical Uniform::HTTP 0.05 messages use its native FastPath ABI. Uniform
 subclasses and framework adapters continue to use the portable message API.
 

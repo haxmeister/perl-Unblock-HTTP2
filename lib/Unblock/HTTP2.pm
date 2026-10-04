@@ -110,10 +110,6 @@ One server HTTP/2 connection.
 
 One HTTP request/response transaction carried by an HTTP/2 stream.
 
-=item L<Unblock::HTTP2::Stream>
-
-Compatibility name for C<Unblock::HTTP2::Transaction>.
-
 =back
 
 =head1 ERROR CODES

@@ -11,7 +11,6 @@ lib/Unblock/HTTP2.pm
 lib/Unblock/HTTP2/Client.pm
 lib/Unblock/HTTP2/Server.pm
 lib/Unblock/HTTP2/Transaction.pm
-lib/Unblock/HTTP2/Stream.pm
 lib/Unblock/HTTP2/_Connection.pm
 lib/Unblock/HTTP2/_Headers.pm
 lib/Unblock/HTTP2/_nghttp2.pm

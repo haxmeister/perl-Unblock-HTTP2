@@ -93,7 +93,6 @@ jobs:
           podchecker lib/Unblock/HTTP2/Client.pm
           podchecker lib/Unblock/HTTP2/Server.pm
           podchecker lib/Unblock/HTTP2/Transaction.pm
-          podchecker lib/Unblock/HTTP2/Stream.pm
 
       - name: Check POD syntax on Windows
         if: runner.os == 'Windows'
@@ -103,4 +102,3 @@ jobs:
           podchecker lib/Unblock/HTTP2/Client.pm
           podchecker lib/Unblock/HTTP2/Server.pm
           podchecker lib/Unblock/HTTP2/Transaction.pm
-          podchecker lib/Unblock/HTTP2/Stream.pm

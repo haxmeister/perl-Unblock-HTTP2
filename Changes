@@ -6,9 +6,8 @@ Unreleased
       application-facing concept.
     - Expose stream_id(), transaction_count(), transaction_for_stream_id(), and
       can_open_transaction() as the preferred public names.
-    - Keep Stream, id(), stream_count(), stream_for_id(), and can_open_stream()
-      as compatibility aliases while preserving HTTP/2 stream terminology for
-      protocol-level state and operations.
+    - Keep HTTP/2 stream terminology only for protocol-level concepts such as
+      stream IDs, flow control, RST_STREAM, GOAWAY boundaries, and SETTINGS.
 
 0.02  2026-10-04
     - Require Uniform::HTTP 0.05 and use its FastPath ABI for exact canonical
