@@ -1580,19 +1580,31 @@ on_begin_headers_callback(nghttp2_session *session,
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
     AV *args;
-    int result;
+    int result = 0;
 
-    if (!ps->cb_begin_headers) {
-        return 0;
+    if (ps->cb_begin_headers) {
+        args = newAV();
+        av_push(args, newSViv(frame->hd.stream_id));
+        av_push(args, newSViv(frame->hd.type));
+        av_push(args, newSViv(frame->hd.flags));
+        result = call_scalar_callback(
+            aTHX_ ps, ps->cb_begin_headers, args);
+        SvREFCNT_dec((SV *)args);
+        if (result != 0) {
+            return result;
+        }
     }
 
-    args = newAV();
-    av_push(args, newSViv(frame->hd.stream_id));
-    av_push(args, newSViv(frame->hd.type));
-    av_push(args, newSViv(frame->hd.flags));
-    result = call_scalar_callback(aTHX_ ps, ps->cb_begin_headers, args);
-    SvREFCNT_dec((SV *)args);
-    return result;
+    if (frame->hd.type == NGHTTP2_HEADERS
+        && !start_header_block(ps, frame)) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpv(
+                "unable to allocate HTTP/2 receive header block", 0);
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    return 0;
 }
 
 static int
@@ -1607,21 +1619,27 @@ on_header_callback(nghttp2_session *session,
 {
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
-    AV *args;
-    int result;
+    unblock_h2_header_block *block;
 
-    if (!ps->cb_header) {
-        return 0;
+    block = find_header_block(ps, frame->hd.stream_id);
+    if (!block) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpv(
+                "HTTP/2 receive header block state is missing", 0);
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
     }
 
-    args = newAV();
-    av_push(args, newSViv(frame->hd.stream_id));
-    av_push(args, newSVpvn((const char *)name, namelen));
-    av_push(args, newSVpvn((const char *)value, valuelen));
-    av_push(args, newSViv(flags));
-    result = call_scalar_callback(aTHX_ ps, ps->cb_header, args);
-    SvREFCNT_dec((SV *)args);
-    return result;
+    if (!append_header_field(
+            ps, block, name, namelen, value, valuelen)) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpv(
+                "unable to allocate HTTP/2 receive header field", 0);
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    return 0;
 }
 
 static int
@@ -1631,15 +1649,29 @@ on_frame_recv_callback(nghttp2_session *session,
 {
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
+    unblock_h2_header_block *block = NULL;
+    HV *frame_hv;
     AV *args;
     int result;
 
+    if (frame->hd.type == NGHTTP2_HEADERS) {
+        block = take_header_block(ps, frame->hd.stream_id);
+    }
+
     if (!ps->cb_frame_recv) {
+        free_header_block(block);
         return 0;
     }
 
+    frame_hv = frame_to_hv(aTHX_ frame);
+    if (frame->hd.type == NGHTTP2_HEADERS) {
+        attach_native_header_result(
+            aTHX_ ps, frame, frame_hv, block);
+    }
+    free_header_block(block);
+
     args = newAV();
-    av_push(args, newRV_noinc((SV *)frame_to_hv(aTHX_ frame)));
+    av_push(args, newRV_noinc((SV *)frame_hv));
     result = call_scalar_callback(aTHX_ ps, ps->cb_frame_recv, args);
     SvREFCNT_dec((SV *)args);
     return result;
@@ -1695,6 +1727,7 @@ on_stream_close_callback(nghttp2_session *session,
     int result = 0;
 
     remove_provider(aTHX_ ps, stream_id);
+    remove_header_block(ps, stream_id);
 
     if (!ps->cb_stream_close) {
         return 0;
