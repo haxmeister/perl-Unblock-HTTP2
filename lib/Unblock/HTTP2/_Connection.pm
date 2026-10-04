@@ -8,18 +8,58 @@ use utf8 ();
 
 our $VERSION = '0.001';
 
+my @SETTING_NAMES = qw(
+    header_table_size
+    enable_push
+    max_concurrent_streams
+    initial_window_size
+    max_frame_size
+    max_header_list_size
+    enable_connect_protocol
+);
+
+my %SETTING_ID = (
+    header_table_size       => 1,
+    enable_push             => 2,
+    max_concurrent_streams  => 3,
+    initial_window_size     => 4,
+    max_frame_size          => 5,
+    max_header_list_size    => 6,
+    enable_connect_protocol => 8,
+);
+
+my %SETTING_NAME = reverse %SETTING_ID;
+
+
 sub _initialize_connection {
-    my ($self, $session) = @_;
+    my ($self, $session, %option) = @_;
 
     croak 'HTTP/2 session must be an object'
         unless blessed($session);
 
-    $self->{session}         = $session;
-    $self->{streams}         = {};
-    $self->{closed}          = 0;
-    $self->{in_session_call} = 0;
-    $self->{close_pending}   = undef;
-    $self->{pending_drain}   = {};
+    my $role = delete $option{role};
+    my $callbacks = delete($option{callbacks}) || {};
+
+    croak 'HTTP/2 connection role must be client or server'
+        unless defined($role) && ($role eq 'client' || $role eq 'server');
+    croak 'HTTP/2 connection callbacks must be a hash reference'
+        unless ref($callbacks) eq 'HASH';
+    croak 'unknown HTTP/2 connection options: ' . join(', ', sort keys %option)
+        if %option;
+
+    $self->{session}          = $session;
+    $self->{role}             = $role;
+    $self->{callbacks}        = $callbacks;
+    $self->{streams}          = {};
+    $self->{closed}           = 0;
+    $self->{in_session_call}  = 0;
+    $self->{close_pending}    = undef;
+    $self->{pending_drain}    = {};
+    $self->{local_settings}   = {};
+    $self->{peer_settings}    = {};
+    $self->{settings_pending} = [];
+
+    $self->_refresh_peer_settings;
     return $self;
 }
 
@@ -128,6 +168,218 @@ sub _consume_stream_body {
 
     $self->{session}->consume_stream($stream->id, $bytes);
     return;
+}
+
+sub local_settings {
+    my ($self) = @_;
+    return { %{ $self->{local_settings} || {} } };
+}
+
+sub local_setting {
+    my ($self, $name) = @_;
+    croak 'local_setting(): setting name is required'
+        unless defined($name) && !ref($name) && length($name);
+    croak "local_setting(): unknown setting '$name'"
+        unless exists $SETTING_ID{$name};
+    return $self->{local_settings}{$name};
+}
+
+sub peer_settings {
+    my ($self) = @_;
+    $self->_refresh_peer_settings
+        if !$self->{closed} && $self->{session};
+    return { %{ $self->{peer_settings} || {} } };
+}
+
+sub peer_setting {
+    my ($self, $name) = @_;
+    croak 'peer_setting(): setting name is required'
+        unless defined($name) && !ref($name) && length($name);
+    croak "peer_setting(): unknown setting '$name'"
+        unless exists $SETTING_ID{$name};
+
+    $self->_refresh_peer_settings
+        if !$self->{closed} && $self->{session};
+    return $self->{peer_settings}{$name};
+}
+
+sub settings_pending {
+    my ($self) = @_;
+    return scalar @{ $self->{settings_pending} || [] };
+}
+
+sub update_settings {
+    my ($self, @settings) = @_;
+
+    croak 'update_settings(): connection is closed'
+        if $self->{closed} || !$self->{session};
+
+    my $input;
+    if (@settings == 1 && ref($settings[0]) eq 'HASH') {
+        $input = $settings[0];
+    }
+    elsif (@settings && @settings % 2 == 0) {
+        $input = { @settings };
+    }
+    else {
+        croak 'update_settings(): expected a hash reference or key/value pairs';
+    }
+
+    $self->_submit_settings('update_settings()', $input);
+    return $self;
+}
+
+sub _submit_settings {
+    my ($self, $operation, $input) = @_;
+    my $settings = $self->_validate_settings($operation, $input);
+
+    $self->{session}->submit_settings($settings);
+
+    my %submitted = %$settings;
+    push @{ $self->{settings_pending} }, \%submitted;
+    @{$self->{local_settings}}{keys %submitted} = values %submitted;
+
+    if (exists $submitted{max_header_list_size}) {
+        $self->{max_header_list_size} = $submitted{max_header_list_size};
+    }
+    if ($self->{role} eq 'server') {
+        if (exists $submitted{max_concurrent_streams}) {
+            $self->{max_concurrent_streams} = $submitted{max_concurrent_streams};
+        }
+        if (exists $submitted{enable_connect_protocol}) {
+            $self->{enable_connect_protocol}
+                = $submitted{enable_connect_protocol};
+        }
+    }
+
+    return $self;
+}
+
+sub _validate_settings {
+    my ($self, $operation, $input) = @_;
+
+    croak "$operation settings must be a hash reference"
+        unless ref($input) eq 'HASH';
+    croak "$operation requires at least one setting"
+        unless keys %$input;
+
+    my %settings;
+    for my $name (keys %$input) {
+        croak "$operation unknown setting '$name'"
+            unless exists $SETTING_ID{$name};
+
+        my $value = $input->{$name};
+        croak "$operation $name must be an unsigned integer"
+            unless defined($value) && !ref($value)
+                && "$value" =~ /\A[0-9]+\z/;
+
+        $value = 0 + $value;
+
+        if ($name eq 'enable_push'
+            || $name eq 'enable_connect_protocol') {
+            croak "$operation $name must be zero or one"
+                unless $value == 0 || $value == 1;
+        }
+        elsif ($name eq 'initial_window_size') {
+            croak "$operation initial_window_size exceeds HTTP/2 maximum"
+                if $value > 2_147_483_647;
+        }
+        elsif ($name eq 'max_frame_size') {
+            croak "$operation max_frame_size must be between 16384 and 16777215"
+                if $value < 16_384 || $value > 16_777_215;
+        }
+        else {
+            croak "$operation $name exceeds HTTP/2 maximum"
+                if $value > 4_294_967_295;
+        }
+
+        $settings{$name} = $value;
+    }
+
+    if (exists $settings{enable_connect_protocol}
+        && ($self->{local_settings}{enable_connect_protocol} || 0) == 1
+        && $settings{enable_connect_protocol} == 0) {
+        croak "$operation enable_connect_protocol cannot return to zero after one";
+    }
+
+    if ($self->{role} eq 'client') {
+        croak "$operation enable_push=1 is unsupported because server push is disabled"
+            if ($settings{enable_push} || 0) == 1;
+    }
+    elsif (exists $settings{enable_push}
+        && $settings{enable_push} != 0) {
+        croak "$operation a server may only send enable_push=0";
+    }
+
+    return \%settings;
+}
+
+sub _refresh_peer_settings {
+    my ($self) = @_;
+    return $self->{peer_settings}
+        unless $self->{session};
+
+    my %settings;
+    for my $name (@SETTING_NAMES) {
+        $settings{$name}
+            = 0 + $self->{session}->remote_setting($SETTING_ID{$name});
+    }
+
+    # RFC 9113 defines a server's initial ENABLE_PUSH value as effectively 0.
+    $settings{enable_push} = 0 if $self->{role} eq 'client';
+
+    $self->{peer_settings} = \%settings;
+    return $self->{peer_settings};
+}
+
+sub _handle_settings_frame {
+    my ($self, $frame) = @_;
+    return 0 unless (($frame->{type} // -1) == 4);
+
+    if (($frame->{flags} || 0) & 0x1) {
+        my $acked = shift @{ $self->{settings_pending} };
+        $acked ||= {};
+        $self->_invoke_control_callback(
+            'on_settings_ack',
+            { %$acked },
+        );
+        return 1;
+    }
+
+    my %changed;
+    for my $pair (@{ $frame->{settings} || [] }) {
+        next unless ref($pair) eq 'ARRAY' && @$pair >= 2;
+        my ($id, $value) = @$pair;
+        my $name = $SETTING_NAME{$id};
+        next unless defined $name;
+        $changed{$name} = 0 + $value;
+    }
+
+    my $peer = $self->_refresh_peer_settings;
+    $self->_invoke_control_callback(
+        'on_settings',
+        { %$peer },
+        \%changed,
+    );
+
+    return 1;
+}
+
+sub _invoke_control_callback {
+    my ($self, $name, @args) = @_;
+    my $callback = $self->{callbacks}{$name} or return 1;
+
+    my $ok = eval {
+        $callback->($self, @args);
+        1;
+    };
+
+    return 1 if $ok;
+
+    my $error = "$name callback failed";
+    $error .= ": $@" if length $@;
+    $self->close($error);
+    return 0;
 }
 
 sub _after_session_call {
