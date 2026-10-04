@@ -1960,6 +1960,530 @@ new_session(pTHX_ HV *callbacks_hv, int server, size_t max_header_list_size)
     return ps;
 }
 
+static HV *
+ub_http2_native_engine_hv(pTHX_ ub_http2_native_context *context)
+{
+    if (!context || !context->engine || !SvROK(context->engine)
+        || SvTYPE(SvRV(context->engine)) != SVt_PVHV) {
+        croak("invalid Unblock::HTTP2 native transport context");
+    }
+
+    return (HV *)SvRV(context->engine);
+}
+
+static int
+ub_http2_native_engine_closed(pTHX_ ub_http2_native_context *context)
+{
+    HV *hv = ub_http2_native_engine_hv(aTHX_ context);
+    SV **value = hv_fetch(hv, "closed", 6, 0);
+
+    return value && SvOK(*value) && SvTRUE(*value) ? 1 : 0;
+}
+
+static int
+ub_http2_native_engine_in_call(pTHX_ ub_http2_native_context *context)
+{
+    HV *hv = ub_http2_native_engine_hv(aTHX_ context);
+    SV **value = hv_fetch(hv, "in_session_call", 15, 0);
+
+    return value && SvOK(*value) && SvTRUE(*value) ? 1 : 0;
+}
+
+static void
+ub_http2_native_set_engine_in_call(
+    pTHX_ ub_http2_native_context *context, int value)
+{
+    HV *hv = ub_http2_native_engine_hv(aTHX_ context);
+    SV **slot = hv_fetch(hv, "in_session_call", 15, 0);
+
+    if (slot) {
+        sv_setiv(*slot, value ? 1 : 0);
+    }
+    else {
+        hv_store(hv, "in_session_call", 15, newSViv(value ? 1 : 0), 0);
+    }
+}
+
+static CV *
+ub_http2_native_engine_method(
+    pTHX_
+    ub_http2_native_context *context,
+    CV **slot,
+    const char *name)
+{
+    GV *gv;
+    CV *cv;
+
+    if (*slot) {
+        return *slot;
+    }
+
+    if (!context || !context->engine || !SvROK(context->engine)) {
+        croak("invalid Unblock::HTTP2 native transport engine");
+    }
+
+    gv = gv_fetchmethod_autoload(
+        SvSTASH(SvRV(context->engine)), name, 0);
+    if (!gv || !(cv = GvCV(gv))) {
+        croak("Unblock::HTTP2 native transport method %s is unavailable",
+            name);
+    }
+
+    *slot = (CV *)SvREFCNT_inc((SV *)cv);
+    return *slot;
+}
+
+static void
+ub_http2_native_call_engine(
+    pTHX_
+    ub_http2_native_context *context,
+    CV **slot,
+    const char *name,
+    SV *arg)
+{
+    CV *cv = ub_http2_native_engine_method(
+        aTHX_ context, slot, name);
+    SV *error = NULL;
+    dSP;
+
+    ENTER;
+    SAVETMPS;
+    sv_setsv(ERRSV, &PL_sv_undef);
+    PUSHMARK(SP);
+    XPUSHs(context->engine);
+    if (arg) {
+        XPUSHs(arg);
+    }
+    PUTBACK;
+    call_sv((SV *)cv, G_DISCARD | G_EVAL);
+    SPAGAIN;
+    if (SvTRUE(ERRSV)) {
+        error = newSVsv(ERRSV);
+    }
+    PUTBACK;
+    FREETMPS;
+    LEAVE;
+
+    if (error) {
+        sv_2mortal(error);
+        croak("%s", SvPV_nolen(error));
+    }
+}
+
+static void
+ub_http2_native_finish_close(
+    pTHX_ ub_http2_native_context *context, SV *error)
+{
+    if (!ub_http2_native_engine_closed(aTHX_ context)) {
+        ub_http2_native_call_engine(
+            aTHX_
+            context,
+            &context->finish_close_cv,
+            "_finish_close",
+            error
+        );
+    }
+}
+
+static int
+ub_http2_native_after_session(
+    pTHX_ ub_http2_native_context *context)
+{
+    HV *hv = ub_http2_native_engine_hv(aTHX_ context);
+    SV **pending = hv_fetch(hv, "close_pending", 13, 0);
+
+    if (pending && SvOK(*pending)) {
+        SV *error = newSVsv(*pending);
+        hv_delete(hv, "close_pending", 13, G_DISCARD);
+        ub_http2_native_finish_close(aTHX_ context, error);
+        SvREFCNT_dec(error);
+    }
+    else {
+        ub_http2_native_call_engine(
+            aTHX_
+            context,
+            &context->after_session_cv,
+            "_after_session_call",
+            NULL
+        );
+    }
+
+    return ub_http2_native_engine_closed(aTHX_ context) ? 1 : 0;
+}
+
+static SV *
+ub_http2_native_take_callback_error(
+    pTHX_ unblock_h2_session *ps)
+{
+    SV *error;
+
+    if (!ps->callback_error) {
+        return NULL;
+    }
+
+    error = newSVsv(ps->callback_error);
+    clear_callback_error(aTHX_ ps);
+    return error;
+}
+
+static void
+ub_http2_native_croak_error(
+    pTHX_ ub_http2_native_context *context, SV *error)
+{
+    const char *message;
+
+    if (!error) {
+        error = newSVpv("Unblock::HTTP2 native transport failure", 0);
+    }
+
+    ub_http2_native_finish_close(aTHX_ context, error);
+    message = SvPV_nolen(error);
+    sv_2mortal(error);
+    croak("%s", message);
+}
+
+static void *
+ub_http2_native_create(pTHX_ SV *engine)
+{
+    ub_http2_native_context *context;
+    HV *engine_hv;
+    SV **session_value;
+
+    if (!engine || !SvROK(engine)
+        || !sv_derived_from(engine, "Unblock::HTTP2::_Connection")
+        || SvTYPE(SvRV(engine)) != SVt_PVHV) {
+        return NULL;
+    }
+
+    engine_hv = (HV *)SvRV(engine);
+    session_value = hv_fetch(engine_hv, "session", 7, 0);
+    if (!session_value || !SvOK(*session_value) || !SvROK(*session_value)
+        || !sv_derived_from(
+            *session_value, "Unblock::HTTP2::_nghttp2::Session")) {
+        return NULL;
+    }
+
+    Newxz(context, 1, ub_http2_native_context);
+    if (!context) {
+        return NULL;
+    }
+
+    context->engine = SvREFCNT_inc(engine);
+    context->session_object = SvREFCNT_inc(*session_value);
+    context->session = session_from_sv(aTHX_ context->session_object);
+    return context;
+}
+
+static int
+ub_http2_native_input(
+    pTHX_
+    void *opaque,
+    const char *data,
+    size_t length,
+    size_t *consumed)
+{
+    ub_http2_native_context *context =
+        (ub_http2_native_context *)opaque;
+    unblock_h2_session *ps;
+    ssize_t rv = 0;
+    SV *error = NULL;
+    int jump_status;
+    int old_session_call;
+    dJMPENV;
+
+    if (!context || !context->session || !consumed) {
+        croak("invalid Unblock::HTTP2 native input context");
+    }
+    if (!data && length) {
+        croak("native input data is NULL with a nonzero length");
+    }
+
+    *consumed = 0;
+    if (ub_http2_native_engine_closed(aTHX_ context)) {
+        return UB_HTTP2_INPUT_CLOSED;
+    }
+    if (ub_http2_native_engine_in_call(aTHX_ context)) {
+        croak("native input cannot be called from an HTTP/2 callback");
+    }
+    if (!length) {
+        return UB_HTTP2_INPUT_OK;
+    }
+
+    ps = context->session;
+    clear_callback_error(aTHX_ ps);
+    old_session_call = ps->in_session_call;
+    ub_http2_native_set_engine_in_call(aTHX_ context, 1);
+    ps->in_session_call = 1;
+
+    JMPENV_PUSH(jump_status);
+    if (jump_status == 0) {
+        rv = nghttp2_session_mem_recv(
+            ps->session, (const uint8_t *)data, length);
+        JMPENV_POP;
+    }
+    else {
+        JMPENV_POP;
+        ps->in_session_call = old_session_call;
+        ub_http2_native_set_engine_in_call(aTHX_ context, 0);
+        drain_pending_free(aTHX_ ps);
+        JMPENV_JUMP(jump_status);
+    }
+
+    ps->in_session_call = old_session_call;
+    ub_http2_native_set_engine_in_call(aTHX_ context, 0);
+    drain_pending_free(aTHX_ ps);
+
+    error = ub_http2_native_take_callback_error(aTHX_ ps);
+    if (!error && rv < 0) {
+        error = newSVpvf(
+            "nghttp2_session_mem_recv failed (%ld): %s",
+            (long)rv, nghttp2_strerror((int)rv));
+    }
+    if (!error && (size_t)rv != length) {
+        error = newSVpv(
+            "native input: nghttp2 did not consume complete input", 0);
+    }
+    if (error) {
+        ub_http2_native_croak_error(aTHX_ context, error);
+    }
+
+    *consumed = (size_t)rv;
+    return ub_http2_native_after_session(aTHX_ context)
+        ? UB_HTTP2_INPUT_CLOSED
+        : UB_HTTP2_INPUT_OK;
+}
+
+static int
+ub_http2_native_output(
+    pTHX_
+    void *opaque,
+    ub_http2_output_sink_v1 sink,
+    void *sink_context,
+    size_t *produced)
+{
+    ub_http2_native_context *context =
+        (ub_http2_native_context *)opaque;
+    unblock_h2_session *ps;
+    const uint8_t *data = NULL;
+    ssize_t rv = 0;
+    size_t total = 0;
+    SV *error = NULL;
+    int sink_result = UB_HTTP2_OUTPUT_CONTINUE;
+    int jump_status;
+    int old_session_call;
+    dJMPENV;
+
+    if (!context || !context->session || !produced) {
+        croak("invalid Unblock::HTTP2 native output context");
+    }
+
+    *produced = 0;
+    if (ub_http2_native_engine_closed(aTHX_ context)) {
+        return UB_HTTP2_OUTPUT_CLOSED;
+    }
+    if (ub_http2_native_engine_in_call(aTHX_ context)) {
+        croak("native output cannot be called from an HTTP/2 callback");
+    }
+
+    ps = context->session;
+    if (!nghttp2_session_want_write(ps->session)) {
+        return UB_HTTP2_OUTPUT_OK;
+    }
+    if (!sink) {
+        croak("native output requires a sink while output is pending");
+    }
+
+    clear_callback_error(aTHX_ ps);
+    old_session_call = ps->in_session_call;
+    ub_http2_native_set_engine_in_call(aTHX_ context, 1);
+    ps->in_session_call = 1;
+
+    JMPENV_PUSH(jump_status);
+    if (jump_status == 0) {
+        for (;;) {
+            rv = nghttp2_session_mem_send(ps->session, &data);
+            if (rv <= 0) {
+                break;
+            }
+
+            sink_result = sink(
+                aTHX_
+                sink_context,
+                (const char *)data,
+                (size_t)rv
+            );
+            total += (size_t)rv;
+
+            if (sink_result == UB_HTTP2_OUTPUT_PAUSE) {
+                rv = 0;
+                break;
+            }
+            if (sink_result != UB_HTTP2_OUTPUT_CONTINUE) {
+                error = newSVpv(
+                    "native output sink reported a fatal failure", 0);
+                rv = 0;
+                break;
+            }
+        }
+        JMPENV_POP;
+    }
+    else {
+        JMPENV_POP;
+        ps->in_session_call = old_session_call;
+        ub_http2_native_set_engine_in_call(aTHX_ context, 0);
+        drain_pending_free(aTHX_ ps);
+        JMPENV_JUMP(jump_status);
+    }
+
+    ps->in_session_call = old_session_call;
+    ub_http2_native_set_engine_in_call(aTHX_ context, 0);
+    drain_pending_free(aTHX_ ps);
+
+    if (!error) {
+        error = ub_http2_native_take_callback_error(aTHX_ ps);
+    }
+    else {
+        clear_callback_error(aTHX_ ps);
+    }
+
+    if (!error && rv < 0) {
+        error = newSVpvf(
+            "nghttp2_session_mem_send failed (%ld): %s",
+            (long)rv, nghttp2_strerror((int)rv));
+    }
+
+    *produced = total;
+    if (error) {
+        ub_http2_native_croak_error(aTHX_ context, error);
+    }
+
+    return ub_http2_native_after_session(aTHX_ context)
+        ? UB_HTTP2_OUTPUT_CLOSED
+        : UB_HTTP2_OUTPUT_OK;
+}
+
+static int
+ub_http2_native_want_read(pTHX_ void *opaque)
+{
+    ub_http2_native_context *context =
+        (ub_http2_native_context *)opaque;
+
+    if (!context || !context->session) {
+        croak("invalid Unblock::HTTP2 native transport context");
+    }
+    if (ub_http2_native_engine_closed(aTHX_ context)) {
+        return 0;
+    }
+
+    return nghttp2_session_want_read(context->session->session) ? 1 : 0;
+}
+
+static int
+ub_http2_native_want_write(pTHX_ void *opaque)
+{
+    ub_http2_native_context *context =
+        (ub_http2_native_context *)opaque;
+
+    if (!context || !context->session) {
+        croak("invalid Unblock::HTTP2 native transport context");
+    }
+    if (ub_http2_native_engine_closed(aTHX_ context)) {
+        return 0;
+    }
+
+    return nghttp2_session_want_write(context->session->session) ? 1 : 0;
+}
+
+static int
+ub_http2_native_eof(pTHX_ void *opaque)
+{
+    ub_http2_native_context *context =
+        (ub_http2_native_context *)opaque;
+    SV *error;
+
+    if (!context || !context->session) {
+        croak("invalid Unblock::HTTP2 native transport context");
+    }
+    if (ub_http2_native_engine_closed(aTHX_ context)) {
+        return UB_HTTP2_INPUT_CLOSED;
+    }
+    if (ub_http2_native_engine_in_call(aTHX_ context)) {
+        croak("native EOF cannot be called from an HTTP/2 callback");
+    }
+
+    error = newSVpv("HTTP/2 transport reached EOF", 0);
+    ub_http2_native_finish_close(aTHX_ context, error);
+    SvREFCNT_dec(error);
+    return UB_HTTP2_INPUT_CLOSED;
+}
+
+static void
+ub_http2_native_destroy(pTHX_ void *opaque)
+{
+    ub_http2_native_context *context =
+        (ub_http2_native_context *)opaque;
+
+    PERL_UNUSED_CONTEXT;
+    if (!context) {
+        return;
+    }
+
+    if (context->after_session_cv) {
+        SvREFCNT_dec((SV *)context->after_session_cv);
+    }
+    if (context->finish_close_cv) {
+        SvREFCNT_dec((SV *)context->finish_close_cv);
+    }
+    if (context->session_object) {
+        SvREFCNT_dec(context->session_object);
+    }
+    if (context->engine) {
+        SvREFCNT_dec(context->engine);
+    }
+    Safefree(context);
+}
+
+static const ub_http2_native_ops_v1 ub_http2_native_ops = {
+    UB_HTTP2_NATIVE_ABI_VERSION,
+    sizeof(ub_http2_native_ops_v1),
+    "Unblock::HTTP2 native transport",
+    ub_http2_native_create,
+    ub_http2_native_input,
+    ub_http2_native_output,
+    ub_http2_native_want_read,
+    ub_http2_native_want_write,
+    ub_http2_native_eof,
+    ub_http2_native_destroy
+};
+
+typedef struct {
+    SV *buffer;
+    int pause_after_first;
+    size_t chunks;
+} ub_http2_test_sink_context;
+
+static int
+ub_http2_test_output_sink(
+    pTHX_
+    void *opaque,
+    const char *data,
+    size_t length)
+{
+    ub_http2_test_sink_context *sink =
+        (ub_http2_test_sink_context *)opaque;
+
+    if (!sink || !sink->buffer) {
+        return UB_HTTP2_OUTPUT_ERROR;
+    }
+
+    sv_catpvn(sink->buffer, data, (STRLEN)length);
+    sink->chunks++;
+    return sink->pause_after_first && sink->chunks >= 1
+        ? UB_HTTP2_OUTPUT_PAUSE
+        : UB_HTTP2_OUTPUT_CONTINUE;
+}
+
+
 MODULE = Unblock::HTTP2    PACKAGE = Unblock::HTTP2::_nghttp2
 
 PROTOTYPES: DISABLE
