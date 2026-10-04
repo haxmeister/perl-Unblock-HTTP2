@@ -7,6 +7,7 @@ require Alien::nghttp2;
 
 my $nghttp2_cflags = Alien::nghttp2->cflags;
 my $nghttp2_libs   = Alien::nghttp2->libs;
+my $nghttp2_define = $^O eq 'MSWin32' ? ' -DNGHTTP2_STATICLIB' : '';
 
 my @public_modules = qw(
     Unblock::HTTP2
@@ -47,7 +48,7 @@ WriteMakefile(
 
     XS      => { 'nghttp2.xs' => 'nghttp2.c' },
     OBJECT  => '$(O_FILES)',
-    CCFLAGS => "$Config{ccflags} $nghttp2_cflags",
+    CCFLAGS => "$Config{ccflags} $nghttp2_cflags$nghttp2_define",
     LIBS    => [ $nghttp2_libs ],
 
     META_MERGE => {
