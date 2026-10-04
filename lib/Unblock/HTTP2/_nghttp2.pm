@@ -19,6 +19,7 @@ use constant {
     SETTINGS_MAX_FRAME_SIZE          => 5,
     SETTINGS_MAX_HEADER_LIST_SIZE    => 6,
     SETTINGS_ENABLE_CONNECT_PROTOCOL => 8,
+    SETTINGS_NO_RFC7540_PRIORITIES   => 9,
 };
 
 package Unblock::HTTP2::_nghttp2::Session;
@@ -128,6 +129,19 @@ sub submit_trailer {
     croak 'submit_trailer(): headers must be an array reference'
         unless ref($headers) eq 'ARRAY';
     return $self->_submit_trailer_native($stream_id, $headers);
+}
+
+sub submit_priority_update {
+    my ($self, $stream_id, $field_value) = @_;
+    croak 'submit_priority_update(): stream id must be a positive integer'
+        unless defined($stream_id) && !ref($stream_id)
+            && "$stream_id" =~ /\A[0-9]+\z/ && $stream_id > 0;
+    croak 'submit_priority_update(): field value must be a scalar'
+        if ref($field_value);
+    $field_value = '' unless defined $field_value;
+    croak 'submit_priority_update(): field value exceeds 16380 bytes'
+        if length($field_value) > 16_380;
+    return $self->_submit_priority_update_native($stream_id, $field_value);
 }
 
 sub submit_ping {
