@@ -30,7 +30,7 @@ The 0.01 core includes:
 - safe handling of unknown extension frame types
 - fatal session failure reporting
 
-HTTP messages use Uniform::HTTP 0.04.
+HTTP messages use Uniform::HTTP 0.05. Canonical Uniform messages use the optional FastPath ABI; adapters and subclasses keep the portable message contract.
 
 ## Intentionally not included
 
