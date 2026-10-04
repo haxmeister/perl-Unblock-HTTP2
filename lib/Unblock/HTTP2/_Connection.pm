@@ -54,6 +54,7 @@ sub _initialize_connection {
     $self->{callbacks}        = $callbacks;
     $self->{streams}          = {};
     $self->{closed}           = 0;
+    $self->{close_reason}      = undef;
     $self->{in_session_call}  = 0;
     $self->{close_pending}    = undef;
     $self->{pending_drain}    = {};
@@ -68,6 +69,10 @@ sub _initialize_connection {
 
 sub is_closed {
     return $_[0]{closed} ? 1 : 0;
+}
+
+sub close_reason {
+    return $_[0]{close_reason};
 }
 
 sub stream_count {
@@ -101,13 +106,23 @@ sub input {
         if $self->{in_session_call};
 
     my $consumed;
-    {
+    my $ok = eval {
         local $self->{in_session_call} = 1;
         $consumed = $self->{session}->mem_recv($bytes);
+        1;
+    };
+
+    if (!$ok) {
+        my $error = length($@) ? "$@" : 'input(): nghttp2 receive failed';
+        $self->_finish_close($error) unless $self->{closed};
+        die $error;
     }
 
-    croak 'input(): nghttp2 did not consume complete input'
-        unless defined($consumed) && $consumed == length($bytes);
+    if (!defined($consumed) || $consumed != length($bytes)) {
+        my $error = 'input(): nghttp2 did not consume complete input';
+        $self->_finish_close($error);
+        croak $error;
+    }
 
     if (defined $self->{close_pending}) {
         $self->_finish_close(delete $self->{close_pending});
@@ -128,9 +143,16 @@ sub output {
     return '' unless $self->{session}->want_write;
 
     my $bytes;
-    {
+    my $ok = eval {
         local $self->{in_session_call} = 1;
         $bytes = $self->{session}->mem_send;
+        1;
+    };
+
+    if (!$ok) {
+        my $error = length($@) ? "$@" : 'output(): nghttp2 send failed';
+        $self->_finish_close($error) unless $self->{closed};
+        die $error;
     }
 
     if (defined $self->{close_pending}) {
@@ -593,6 +615,7 @@ sub _finish_close {
     return $self if $self->{closed};
 
     $self->{closed} = 1;
+    $self->{close_reason} = "$error";
 
     for my $stream (values %{ $self->{streams} }) {
         next if $stream->is_terminal;
