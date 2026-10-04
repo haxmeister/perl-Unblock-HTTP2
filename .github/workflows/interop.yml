@@ -26,7 +26,7 @@ jobs:
         shell: bash
         run: |
           cpanm --notest Alien::nghttp2
-          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest Uniform::HTTP@0.05
           cpanm --notest --installdeps .
 
       - name: Build
