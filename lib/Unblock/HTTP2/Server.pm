@@ -402,8 +402,7 @@ sub _write_stream_body {
     my $provider = $self->{providers}{ $stream->id }
         or croak "$operation(): Stream has no streaming Response body";
 
-    croak "$operation(): body must be a scalar" if ref($bytes);
-    $bytes = '' unless defined $bytes;
+    $bytes = $self->_body_bytes("$operation()", $bytes);
     croak "$operation(): streaming Response body is already complete"
         if $provider->{eof};
 
