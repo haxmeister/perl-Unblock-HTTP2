@@ -13,8 +13,11 @@ is Unblock::HTTP2::REFUSED_STREAM(), 7,
     'REFUSED_STREAM constant has the RFC value';
 is Unblock::HTTP2::CANCEL(), 8,
     'CANCEL constant has the RFC value';
-is Unblock::HTTP2->error_name(7), 'REFUSED_STREAM',
-    'error_name maps known HTTP/2 error codes';
+is(
+    Unblock::HTTP2->error_name(7),
+    'REFUSED_STREAM',
+    'error_name maps known HTTP/2 error codes',
+);
 ok !defined(Unblock::HTTP2->error_name(999)),
     'error_name returns undef for unknown codes';
 
