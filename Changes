@@ -46,6 +46,8 @@ Revision history for Unblock-HTTP2
       the setting even when the attempted value is zero.
     - Correct the documented public SETTINGS list to include
       no_rfc7540_priorities.
+    - Tighten outbound pseudo-header validation so ordinary requests cannot
+      emit an empty :path and Extended CONNECT cannot emit an empty :protocol.
     - Preserve RST_STREAM error codes with public RFC constants,
       Stream->reset(), error_code/error_name/reset_by_peer accessors, and
       reset codes passed through error callbacks for higher-layer retry policy.
