@@ -93,6 +93,7 @@ sub new {
         max_concurrent_streams => 100,
         max_header_list_size   => $self->{max_header_list_size},
     );
+    $self->_mark_output_pending;
 
     return $self;
 }
@@ -209,6 +210,7 @@ sub request {
     }
 
     $request->commit;
+    $self->_mark_output_pending;
     return $stream;
 }
 
@@ -450,6 +452,7 @@ sub _stream_failure {
 
     $stream->_fail($error);
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
+    $self->_mark_output_pending;
     $self->_invoke_stream_error($stream, $error);
     return;
 }
@@ -475,6 +478,8 @@ sub _write_stream_body {
         $self->{session}->resume_stream($stream->id);
     }
 
+    $self->_mark_output_pending;
+
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
     $provider->{blocked} = 1 if $blocked;
     return $blocked ? 0 : 1;
@@ -489,6 +494,7 @@ sub _cancel_stream {
     return if $stream->is_terminal;
 
     eval { $self->{session}->submit_rst_stream($stream->id, H2_CANCEL) };
+    $self->_mark_output_pending;
     $stream->_mark_cancelled;
     return;
 }
