@@ -483,9 +483,8 @@ sub _validate_settings {
         croak "$operation enable_push=1 is unsupported because server push is disabled"
             if ($settings{enable_push} || 0) == 1;
     }
-    elsif (exists $settings{enable_push}
-        && $settings{enable_push} != 0) {
-        croak "$operation a server may only send enable_push=0";
+    elsif (exists $settings{enable_push}) {
+        croak "$operation a server must not send enable_push";
     }
 
     return \%settings;
@@ -502,7 +501,8 @@ sub _refresh_peer_settings {
             = 0 + $self->{session}->remote_setting($SETTING_ID{$name});
     }
 
-    # RFC 9113 defines a server's initial ENABLE_PUSH value as effectively 0.
+    # ENABLE_PUSH is a client-to-server setting.  It has no server-advertised
+    # peer value for a client, and Unblock does not support server push.
     $settings{enable_push} = 0 if $self->{role} eq 'client';
 
     $self->{peer_settings} = \%settings;
