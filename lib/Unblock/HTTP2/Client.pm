@@ -79,14 +79,11 @@ sub new {
     weaken($weak);
 
     my $session = Unblock::HTTP2::_nghttp2::Session->new_client(
+        max_header_list_size => $self->{max_header_list_size},
         callbacks => {
             on_begin_headers => sub {
                 my $self = $weak or return 0;
                 return $self->_on_begin_headers(@_);
-            },
-            on_header => sub {
-                my $self = $weak or return 0;
-                return $self->_on_header(@_);
             },
             on_frame_recv => sub {
                 my $self = $weak or return 0;
@@ -246,13 +243,8 @@ sub request {
 
     $self->_register_transaction($transaction);
     $self->{receive}{$stream_id} = {
-        header_block          => [],
-        trailer_block         => [],
-        collecting            => 'initial',
-        header_list_size      => 0,
-        header_limit_exceeded => 0,
-        response              => undef,
-        response_done         => 0,
+        response      => undef,
+        response_done => 0,
     };
 
     if ($provider) {
@@ -313,54 +305,7 @@ sub _submit_provider_trailers {
     return;
 }
 sub _on_begin_headers {
-    my ($self, $stream_id, $frame_type, $flags) = @_;
-    my $state = $self->{receive}{$stream_id} or return 0;
-
-    $state->{header_list_size} = 0;
-    $state->{header_limit_exceeded} = 0;
-
-    if ($state->{response}) {
-        $state->{trailer_block} = [];
-        $state->{collecting} = 'trailer';
-    }
-    else {
-        $state->{header_block} = [];
-        $state->{collecting} = 'initial';
-    }
-
     return 0;
-}
-sub _on_header {
-    my ($self, $stream_id, $name, $value, $flags) = @_;
-    my $state = $self->{receive}{$stream_id} or return 0;
-    return 0 if $state->{header_limit_exceeded};
-
-    my $size = $state->{header_list_size}
-        + length($name) + length($value) + 32;
-
-    if ($size > $self->{max_header_list_size}) {
-        $state->{header_limit_exceeded} = 1;
-        $self->_stream_failure(
-            $stream_id,
-            'HTTP/2 response header list exceeds configured limit',
-            H2_ENHANCE_YOUR_CALM,
-        );
-        return 0;
-    }
-
-    $state->{header_list_size} = $size;
-    my $key = $state->{collecting} eq 'trailer'
-        ? 'trailer_block'
-        : 'header_block';
-    push @{ $state->{$key} }, [ $name, $value ];
-    return 0;
-}
-sub _status_from_block {
-    my ($block) = @_;
-    for my $pair (@$block) {
-        return $pair->[1] if $pair->[0] eq ':status';
-    }
-    return;
 }
 
 sub _on_invalid_frame {
@@ -397,45 +342,35 @@ sub _on_frame_recv {
     return 0 unless $stream_id;
 
     my $state = $self->{receive}{$stream_id} or return 0;
-    return 0 if $state->{header_limit_exceeded};
-
     my $transaction = $self->transaction_for_stream_id($stream_id) or return 0;
 
     if (($frame->{type} // -1) == H2_HEADERS) {
+        if (defined $frame->{header_error}) {
+            $self->_stream_failure(
+                $stream_id,
+                "$frame->{header_error}",
+                $frame->{header_error_code},
+            );
+            return 0;
+        }
+
         if (!$state->{response}) {
-            my $status = _status_from_block($state->{header_block});
+            my $response = $frame->{uniform_message};
+            if (!$response) {
+                $self->_stream_failure(
+                    $stream_id,
+                    'HTTP/2 response header block did not produce a Uniform response',
+                );
+                return 0;
+            }
 
-            if (defined($status) && $status =~ /\A1[0-9][0-9]\z/) {
-                my $response = eval {
-                    Unblock::HTTP2::_Headers->response_from_headers(
-                        $state->{header_block},
-                        end_stream => 1,
-                    );
-                };
-
-                if (!$response) {
-                    $self->_stream_failure($stream_id, "$@");
-                    return 0;
-                }
-
+            my $status = $response->status;
+            if ($status >= 100 && $status < 200) {
                 my $result = $transaction->_invoke(
                     'on_informational', $response,
                 );
                 $self->_stream_failure($stream_id, "$result")
                     unless $result eq '1';
-                return 0;
-            }
-
-            my $response = eval {
-                Unblock::HTTP2::_Headers->response_from_headers(
-                    $state->{header_block},
-                    end_stream => (($frame->{flags} || 0) & H2_END_STREAM)
-                        ? 1 : 0,
-                );
-            };
-
-            if (!$response) {
-                $self->_stream_failure($stream_id, "$@");
                 return 0;
             }
 
@@ -466,7 +401,7 @@ sub _on_frame_recv {
         my $ok = eval {
             Unblock::HTTP2::_Headers->apply_trailers(
                 $state->{response},
-                $state->{trailer_block},
+                $frame->{native_headers} || [],
             );
             1;
         };
@@ -486,6 +421,7 @@ sub _on_frame_recv {
 
     return 0;
 }
+
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $state = $self->{receive}{$stream_id} or return 0;
