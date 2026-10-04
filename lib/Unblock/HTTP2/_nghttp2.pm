@@ -1,0 +1,153 @@
+package Unblock::HTTP2::_nghttp2;
+
+use strict;
+use warnings;
+use Carp qw(croak);
+
+our $VERSION = '0.001';
+
+require XSLoader;
+XSLoader::load('Unblock::HTTP2', $VERSION);
+
+sub available { return _available() ? 1 : 0 }
+
+use constant {
+    SETTINGS_HEADER_TABLE_SIZE       => 1,
+    SETTINGS_ENABLE_PUSH             => 2,
+    SETTINGS_MAX_CONCURRENT_STREAMS  => 3,
+    SETTINGS_INITIAL_WINDOW_SIZE     => 4,
+    SETTINGS_MAX_FRAME_SIZE          => 5,
+    SETTINGS_MAX_HEADER_LIST_SIZE    => 6,
+    SETTINGS_ENABLE_CONNECT_PROTOCOL => 8,
+};
+
+package Unblock::HTTP2::_nghttp2::Session;
+
+use strict;
+use warnings;
+use Carp qw(croak);
+
+sub _callbacks {
+    my ($callbacks) = @_;
+    $callbacks ||= {};
+    croak 'callbacks must be a hash reference' unless ref($callbacks) eq 'HASH';
+    for my $name (keys %$callbacks) {
+        my $cb = $callbacks->{$name};
+        croak "callback $name must be a coderef"
+            if defined($cb) && ref($cb) ne 'CODE';
+    }
+    return $callbacks;
+}
+
+sub new_client {
+    my ($class, %args) = @_;
+    my $callbacks = _callbacks(delete($args{callbacks}));
+    croak 'new_client(): unknown options: ' . join(', ', sort keys %args)
+        if %args;
+    return $class->_new_client_xs($callbacks);
+}
+
+sub new_server {
+    my ($class, %args) = @_;
+    my $callbacks = _callbacks(delete($args{callbacks}));
+    croak 'new_server(): unknown options: ' . join(', ', sort keys %args)
+        if %args;
+    return $class->_new_server_xs($callbacks);
+}
+
+sub send_connection_preface {
+    my ($self, %settings) = @_;
+    return $self->submit_settings(\%settings);
+}
+
+sub _body_provider {
+    my ($body) = @_;
+    return unless defined $body;
+    return $body if ref($body) eq 'CODE';
+    croak 'body must be a byte string or coderef' if ref($body);
+    return if !length($body);
+
+    my $offset = 0;
+    my $length = length($body);
+    return sub {
+        my ($stream_id, $max_length) = @_;
+        my $left = $length - $offset;
+        my $take = $left < $max_length ? $left : $max_length;
+        my $chunk = substr($body, $offset, $take);
+        $offset += $take;
+        return ($chunk, $offset >= $length ? 1 : 0);
+    };
+}
+
+sub _submit_request_xs {
+    my ($self, $headers, $body) = @_;
+    my $provider = _body_provider($body);
+    return $self->_submit_request_native($headers, $provider);
+}
+
+sub submit_response {
+    my ($self, $stream_id, %args) = @_;
+    my $status = exists($args{status}) ? delete($args{status}) : 200;
+    my $headers = delete($args{headers}) || [];
+    my $body = delete $args{body};
+    my $data_callback = delete $args{data_callback};
+    delete $args{callback_data};
+    croak 'submit_response(): unknown options: ' . join(', ', sort keys %args)
+        if %args;
+    croak 'submit_response(): headers must be an array reference'
+        unless ref($headers) eq 'ARRAY';
+    croak 'submit_response(): status must be an integer'
+        unless defined($status) && !ref($status) && $status =~ /\A[0-9]+\z/;
+
+    my @block = ([ ':status', "$status" ], @$headers);
+    my $provider = defined($data_callback)
+        ? _body_provider($data_callback)
+        : _body_provider($body);
+
+    return $provider
+        ? $self->_submit_response_streaming_native($stream_id, \@block, $provider)
+        : $self->_submit_response_no_body_native($stream_id, \@block);
+}
+
+sub submit_headers {
+    my ($self, $stream_id, %args) = @_;
+    my $headers = delete($args{headers}) || [];
+    my $end_stream = delete($args{end_stream}) || 0;
+    croak 'submit_headers(): unknown options: ' . join(', ', sort keys %args)
+        if %args;
+    croak 'submit_headers(): headers must be an array reference'
+        unless ref($headers) eq 'ARRAY';
+    return $self->_submit_headers_native($stream_id, $headers, $end_stream ? 1 : 0);
+}
+
+sub submit_trailer {
+    my ($self, $stream_id, %args) = @_;
+    my $headers = delete($args{headers}) || [];
+    croak 'submit_trailer(): unknown options: ' . join(', ', sort keys %args)
+        if %args;
+    croak 'submit_trailer(): headers must be an array reference'
+        unless ref($headers) eq 'ARRAY';
+    return $self->_submit_trailer_native($stream_id, $headers);
+}
+
+sub submit_goaway {
+    my ($self, %args) = @_;
+    my $last_stream_id = delete $args{last_stream_id};
+    croak 'submit_goaway(): last_stream_id is required'
+        unless defined $last_stream_id;
+    my $error_code = exists($args{error_code}) ? delete($args{error_code}) : 0;
+    my $debug_data = exists($args{debug_data})
+        ? delete($args{debug_data})
+        : delete($args{opaque_data});
+    croak 'submit_goaway(): unknown options: ' . join(', ', sort keys %args)
+        if %args;
+    return $self->_submit_goaway_native($last_stream_id, $error_code, $debug_data);
+}
+
+sub resume_stream {
+    my ($self, $stream_id) = @_;
+    $self->_clear_deferred($stream_id);
+    return $self->resume_data($stream_id);
+}
+
+1;
