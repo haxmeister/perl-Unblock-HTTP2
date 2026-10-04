@@ -1,0 +1,96 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            perl: '5.16'
+            distribution: default
+          - os: ubuntu-latest
+            perl: 'latest'
+            distribution: default
+          - os: macos-latest
+            perl: 'latest'
+            distribution: default
+          - os: windows-latest
+            perl: '5.40'
+            distribution: strawberry
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+          distribution: ${{ matrix.distribution }}
+
+      - name: Install nghttp2 development files on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev pkg-config
+
+      - name: Install nghttp2 development files on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install nghttp2 pkg-config
+
+      - name: Install dependencies
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          cpanm --notest Alien::nghttp2
+          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest --installdeps .
+
+      - name: Install dependencies on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cpanm -v --notest Alien::nghttp2
+          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest --installdeps .
+
+      - name: Build and test
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE" test
+
+      - name: Build and test on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          perl Makefile.PL
+          perl -MConfig -e 'system($Config{make}, "test"); exit($? >> 8)'
+
+      - name: Check POD syntax
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          podchecker lib/Unblock/HTTP2.pm
+          podchecker lib/Unblock/HTTP2/Client.pm
+          podchecker lib/Unblock/HTTP2/Server.pm
+          podchecker lib/Unblock/HTTP2/Stream.pm
+
+      - name: Check POD syntax on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          podchecker lib/Unblock/HTTP2.pm
+          podchecker lib/Unblock/HTTP2/Client.pm
+          podchecker lib/Unblock/HTTP2/Server.pm
+          podchecker lib/Unblock/HTTP2/Stream.pm
