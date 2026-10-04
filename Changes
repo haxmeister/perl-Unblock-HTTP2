@@ -32,6 +32,11 @@ Revision history for Unblock-HTTP2
     - Add RFC 9218 extensible prioritization with
       SETTINGS_NO_RFC7540_PRIORITIES, ordinary Priority headers,
       client Stream->update_priority(), and server on_priority observation.
+    - Add symmetric on_invalid_frame observation for protocol-invalid
+      frames while retaining nghttp2's automatic RST_STREAM/GOAWAY handling.
+    - Verify unknown extension frame types are ignored as required by HTTP/2.
+    - Stop routing nghttp2's debug-only error callback through public server
+      on_error.
     - Preserve RST_STREAM error codes with public RFC constants,
       Stream->reset(), error_code/error_name/reset_by_peer accessors, and
       reset codes passed through error callbacks for higher-layer retry policy.
