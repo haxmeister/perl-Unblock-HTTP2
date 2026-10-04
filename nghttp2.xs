@@ -2,26 +2,12 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "uniform_http_fastpath.h"
 
 #include <nghttp2/nghttp2.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-
-#define UHFP_ABI_VERSION 1
-#define UHFP_KIND_REQUEST 1
-#define UHFP_KIND_RESPONSE 2
-#define UHFP_SLOT_ABI 0
-#define UHFP_SLOT_KIND 1
-#define UHFP_SLOT_VERSION 3
-#define UHFP_SLOT_METHOD 4
-#define UHFP_SLOT_TARGET 5
-#define UHFP_SLOT_SCHEME 6
-#define UHFP_SLOT_AUTHORITY 7
-#define UHFP_SLOT_PROTOCOL 8
-#define UHFP_SLOT_STATUS 9
-#define UHFP_SLOT_HEADERS 11
-#define UHFP_SLOT_COUNT 14
 
 typedef struct unblock_h2_provider unblock_h2_provider;
 
@@ -36,6 +22,7 @@ struct unblock_h2_provider {
 
 typedef struct {
     nghttp2_session *session;
+    uhttp_native_api uniform_api;
     SV *cb_begin_headers;
     SV *cb_header;
     SV *cb_frame_recv;
@@ -295,58 +282,26 @@ headers_to_nva(pTHX_ AV *headers, size_t *count_out)
 }
 
 
-static SV *
-uniform_fast_slot(pTHX_ AV *view, I32 index)
+static void
+validate_uniform_native_view(pTHX_ unblock_h2_session *ps, SV *message,
+                             U32 expected_kind, uhttp_native_view *view)
 {
-    SV **svp = av_fetch(view, index, 0);
-
-    if (!svp || !SvOK(*svp)) {
-        return NULL;
-    }
-    return *svp;
-}
-
-static AV *
-validate_uniform_fast_view(pTHX_ AV *view, IV expected_kind)
-{
-    SV *abi_sv;
-    SV *kind_sv;
-    SV *version_sv;
-    SV *headers_sv;
     STRLEN version_len;
     const char *version;
 
-    if (av_len(view) != UHFP_SLOT_COUNT - 1) {
-        croak("Uniform::HTTP FastPath view has the wrong number of slots");
+    if (!uhttp_native_inspect(aTHX_ &ps->uniform_api, message, view)) {
+        croak("Uniform::HTTP native path requires an exact canonical message");
+    }
+    if (view->kind != expected_kind) {
+        croak("Uniform::HTTP native path has the wrong message kind");
     }
 
-    abi_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_ABI);
-    kind_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_KIND);
-    if (!abi_sv || SvROK(abi_sv) || SvIV(abi_sv) != UHFP_ABI_VERSION) {
-        croak("unsupported Uniform::HTTP FastPath ABI");
-    }
-    if (!kind_sv || SvROK(kind_sv) || SvIV(kind_sv) != expected_kind) {
-        croak("Uniform::HTTP FastPath view has the wrong message kind");
-    }
-
-    version_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_VERSION);
-    if (version_sv) {
-        if (SvROK(version_sv)) {
-            croak("Uniform::HTTP FastPath version must be a plain scalar");
-        }
-        version = SvPVbyte(version_sv, version_len);
+    if (SvOK(view->version)) {
+        version = SvPVbyte(view->version, version_len);
         if (version_len != 1 || version[0] != '2') {
             croak("explicit HTTP version must be 2");
         }
     }
-
-    headers_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_HEADERS);
-    if (!headers_sv || !SvROK(headers_sv)
-        || SvTYPE(SvRV(headers_sv)) != SVt_PVAV) {
-        croak("Uniform::HTTP FastPath headers must be an array reference");
-    }
-
-    return (AV *)SvRV(headers_sv);
 }
 
 static int
@@ -397,7 +352,7 @@ http_token_char(unsigned char ch)
 }
 
 static void
-validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
+validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, Size_t index)
 {
     STRLEN name_len;
     STRLEN value_len;
@@ -405,28 +360,31 @@ validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
     const char *value;
     size_t i;
 
-    if (!name_sv || !value_sv || SvROK(name_sv) || SvROK(value_sv)) {
-        croak("header %ld name and value must be defined scalars", (long)index);
+    if (!name_sv || !value_sv || !SvOK(name_sv) || !SvOK(value_sv)
+        || SvROK(name_sv) || SvROK(value_sv)) {
+        croak("header %lu name and value must be defined scalars",
+            (unsigned long)index);
     }
 
     name = SvPVbyte(name_sv, name_len);
     value = SvPVbyte(value_sv, value_len);
 
     if (name_len == 0) {
-        croak("header %ld name must not be empty", (long)index);
+        croak("header %lu name must not be empty", (unsigned long)index);
     }
 
     for (i = 0; i < (size_t)name_len; i++) {
         if (!http_token_char((unsigned char)name[i])) {
-            croak("header %ld name must be an HTTP token", (long)index);
+            croak("header %lu name must be an HTTP token",
+                (unsigned long)index);
         }
     }
 
     for (i = 0; i < (size_t)value_len; i++) {
         unsigned char ch = (unsigned char)value[i];
         if (ch <= 0x08 || (ch >= 0x0a && ch <= 0x1f) || ch == 0x7f) {
-            croak("header %ld value contains a prohibited control byte",
-                (long)index);
+            croak("header %lu value contains a prohibited control byte",
+                (unsigned long)index);
         }
     }
 
@@ -435,7 +393,8 @@ validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
         || ascii_equal_ci(name, (size_t)name_len, "proxy-connection")
         || ascii_equal_ci(name, (size_t)name_len, "transfer-encoding")
         || ascii_equal_ci(name, (size_t)name_len, "upgrade")) {
-        croak("HTTP/2 forbids connection-specific header '%s'", name);
+        croak("HTTP/2 forbids connection-specific header '%.*s'",
+            (int)name_len, name);
     }
 
     if (ascii_equal_ci(name, (size_t)name_len, "te")
@@ -445,47 +404,33 @@ validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
 }
 
 static size_t
-measure_normal_headers(pTHX_ AV *headers, size_t *name_bytes_out)
+measure_native_headers(pTHX_ const uhttp_native_section *headers,
+                       size_t *name_bytes_out)
 {
-    I32 last = av_len(headers);
-    I32 i;
-    size_t count = last < 0 ? 0 : (size_t)last + 1;
+    Size_t count = uhttp_native_field_count(aTHX_ headers);
+    Size_t i;
     size_t name_bytes = 0;
 
-    for (i = 0; i <= last; i++) {
-        SV **pair_sv = av_fetch(headers, i, 0);
-        AV *pair;
-        SV **name_sv;
-        SV **value_sv;
+    for (i = 0; i < count; i++) {
+        SV *name_sv;
+        SV *value_sv;
         STRLEN name_len;
 
-        if (!pair_sv || !SvROK(*pair_sv)
-            || SvTYPE(SvRV(*pair_sv)) != SVt_PVAV) {
-            croak("header %ld must be a two-element array reference", (long)i);
+        if (!uhttp_native_field_at(aTHX_ headers, i, &name_sv, &value_sv)) {
+            croak("Uniform::HTTP native header index is out of range");
         }
-
-        pair = (AV *)SvRV(*pair_sv);
-        if (av_len(pair) != 1) {
-            croak("header %ld must be a two-element array reference", (long)i);
-        }
-
-        name_sv = av_fetch(pair, 0, 0);
-        value_sv = av_fetch(pair, 1, 0);
-        if (!name_sv || !value_sv || !SvOK(*name_sv) || !SvOK(*value_sv)) {
-            croak("header %ld name and value must be defined scalars", (long)i);
-        }
-
-        validate_h2_normal_field(aTHX_ *name_sv, *value_sv, i);
-        (void)SvPVbyte(*name_sv, name_len);
+        validate_h2_normal_field(aTHX_ name_sv, value_sv, i);
+        (void)SvPVbyte(name_sv, name_len);
         name_bytes += (size_t)name_len;
     }
 
     *name_bytes_out = name_bytes;
-    return count;
+    return (size_t)count;
 }
 
 static void
-set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len, SV *value_sv)
+set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len,
+               SV *value_sv)
 {
     STRLEN value_len;
     const char *value = SvPVbyte(value_sv, value_len);
@@ -498,24 +443,29 @@ set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len, SV *valu
 }
 
 static void
-append_normal_headers(pTHX_ nghttp2_nv *nva, size_t start,
-                      AV *headers, char *name_buffer)
+append_native_headers(pTHX_ nghttp2_nv *nva, size_t start,
+                      const uhttp_native_section *headers, char *name_buffer)
 {
-    I32 last = av_len(headers);
-    I32 i;
+    Size_t count = uhttp_native_field_count(aTHX_ headers);
+    Size_t i;
     size_t out = start;
     char *cursor = name_buffer;
 
-    for (i = 0; i <= last; i++, out++) {
-        SV **pair_sv = av_fetch(headers, i, 0);
-        AV *pair = (AV *)SvRV(*pair_sv);
-        SV **name_sv = av_fetch(pair, 0, 0);
-        SV **value_sv = av_fetch(pair, 1, 0);
+    for (i = 0; i < count; i++, out++) {
+        SV *name_sv;
+        SV *value_sv;
         STRLEN name_len;
         STRLEN value_len;
-        const char *name = SvPVbyte(*name_sv, name_len);
-        const char *value = SvPVbyte(*value_sv, value_len);
+        const char *name;
+        const char *value;
         size_t j;
+
+        if (!uhttp_native_field_at(aTHX_ headers, i, &name_sv, &value_sv)) {
+            croak("Uniform::HTTP native header index is out of range");
+        }
+
+        name = SvPVbyte(name_sv, name_len);
+        value = SvPVbyte(value_sv, value_len);
 
         for (j = 0; j < (size_t)name_len; j++) {
             unsigned char ch = (unsigned char)name[j];
@@ -533,14 +483,15 @@ append_normal_headers(pTHX_ nghttp2_nv *nva, size_t start,
 }
 
 static nghttp2_nv *
-uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
+uniform_request_to_nva(pTHX_ unblock_h2_session *ps, SV *message,
+                       size_t *count_out)
 {
-    AV *headers = validate_uniform_fast_view(aTHX_ view, UHFP_KIND_REQUEST);
-    SV *method_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_METHOD);
-    SV *target_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_TARGET);
-    SV *scheme_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_SCHEME);
-    SV *authority_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_AUTHORITY);
-    SV *protocol_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_PROTOCOL);
+    uhttp_native_view view;
+    SV *method_sv;
+    SV *target_sv;
+    SV *scheme_sv;
+    SV *authority_sv;
+    SV *protocol_sv;
     STRLEN method_len;
     STRLEN target_len;
     STRLEN scheme_len = 0;
@@ -559,36 +510,31 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
     char *name_buffer;
     size_t out = 0;
 
-    if (!method_sv || !target_sv || SvROK(method_sv) || SvROK(target_sv)) {
-        croak("Uniform::HTTP FastPath request requires method and target");
-    }
+    validate_uniform_native_view(
+        aTHX_ ps, message, UHTTP_KIND_REQUEST, &view);
+
+    method_sv = view.method;
+    target_sv = view.target;
+    scheme_sv = view.scheme;
+    authority_sv = view.authority;
+    protocol_sv = view.protocol;
 
     method = SvPVbyte(method_sv, method_len);
     target = SvPVbyte(target_sv, target_len);
-    if (authority_sv && !SvROK(authority_sv)) {
+    if (SvOK(authority_sv)) {
         authority = SvPVbyte(authority_sv, authority_len);
     }
-    else if (authority_sv) {
-        croak("Uniform::HTTP FastPath request authority must be a plain scalar");
-    }
-    if (scheme_sv && !SvROK(scheme_sv)) {
+    if (SvOK(scheme_sv)) {
         scheme = SvPVbyte(scheme_sv, scheme_len);
     }
-    else if (scheme_sv) {
-        croak("Uniform::HTTP FastPath request scheme must be a plain scalar");
-    }
-    if (protocol_sv && !SvROK(protocol_sv)) {
+    if (SvOK(protocol_sv)) {
         protocol = SvPVbyte(protocol_sv, protocol_len);
-    }
-    else if (protocol_sv) {
-        croak("Uniform::HTTP FastPath request protocol must be a plain scalar");
     }
 
     if (ascii_equal_ci(method, (size_t)method_len, "CONNECT")) {
         if (!authority || authority_len == 0) {
             croak("request_headers(): CONNECT requires authority");
         }
-
         if (protocol) {
             if (protocol_len == 0) {
                 croak("request_headers(): extended CONNECT requires nonempty protocol");
@@ -628,17 +574,16 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
         pseudo_count = 4;
     }
 
-    normal_count = measure_normal_headers(aTHX_ headers, &normal_name_bytes);
+    normal_count = measure_native_headers(
+        aTHX_ &view.headers, &normal_name_bytes);
     count = pseudo_count + normal_count;
-    nva = (nghttp2_nv *)calloc(
-        1, count * sizeof(*nva) + normal_name_bytes);
+    nva = (nghttp2_nv *)calloc(1, count * sizeof(*nva) + normal_name_bytes);
     if (!nva) {
-        croak("unable to allocate HTTP/2 Uniform FastPath header block");
+        croak("unable to allocate HTTP/2 Uniform native header block");
     }
     name_buffer = (char *)(nva + count);
 
     set_nv_from_sv(aTHX_ &nva[out++], ":method", 7, method_sv);
-
     if (ascii_equal_ci(method, (size_t)method_len, "CONNECT")) {
         if (protocol) {
             set_nv_from_sv(aTHX_ &nva[out++], ":protocol", 9, protocol_sv);
@@ -656,51 +601,54 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
         set_nv_from_sv(aTHX_ &nva[out++], ":path", 5, target_sv);
     }
 
-    append_normal_headers(aTHX_ nva, out, headers, name_buffer);
+    append_native_headers(aTHX_ nva, out, &view.headers, name_buffer);
     *count_out = count;
     return nva;
 }
 
 static nghttp2_nv *
-uniform_response_to_nva(pTHX_ AV *view, size_t *count_out)
+uniform_response_to_nva(pTHX_ unblock_h2_session *ps, SV *message,
+                        size_t *count_out)
 {
-    AV *headers = validate_uniform_fast_view(aTHX_ view, UHFP_KIND_RESPONSE);
-    SV *status_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_STATUS);
-    STRLEN status_len;
-    const char *status;
+    uhttp_native_view view;
     IV status_value;
     size_t normal_count;
     size_t normal_name_bytes;
     size_t count;
     nghttp2_nv *nva;
+    char *status_buffer;
     char *name_buffer;
 
-    if (!status_sv || SvROK(status_sv)) {
-        croak("Uniform::HTTP FastPath response requires status");
-    }
+    validate_uniform_native_view(
+        aTHX_ ps, message, UHTTP_KIND_RESPONSE, &view);
 
-    status = SvPVbyte(status_sv, status_len);
-    status_value = SvIV(status_sv);
-    if (status_len != 3
-        || status[0] < '1' || status[0] > '5'
-        || status[1] < '0' || status[1] > '9'
-        || status[2] < '0' || status[2] > '9'
-        || status_value < 100 || status_value > 599) {
+    status_value = SvIV(view.status);
+    if (status_value < 100 || status_value > 599) {
         croak("response_headers(): status must be an integer from 100 through 599");
     }
 
-    normal_count = measure_normal_headers(aTHX_ headers, &normal_name_bytes);
+    normal_count = measure_native_headers(
+        aTHX_ &view.headers, &normal_name_bytes);
     count = 1 + normal_count;
     nva = (nghttp2_nv *)calloc(
-        1, count * sizeof(*nva) + normal_name_bytes);
+        1, count * sizeof(*nva) + 3 + normal_name_bytes);
     if (!nva) {
-        croak("unable to allocate HTTP/2 Uniform FastPath header block");
+        croak("unable to allocate HTTP/2 Uniform native header block");
     }
-    name_buffer = (char *)(nva + count);
 
-    set_nv_from_sv(aTHX_ &nva[0], ":status", 7, status_sv);
-    append_normal_headers(aTHX_ nva, 1, headers, name_buffer);
+    status_buffer = (char *)(nva + count);
+    status_buffer[0] = (char)('0' + (status_value / 100) % 10);
+    status_buffer[1] = (char)('0' + (status_value / 10) % 10);
+    status_buffer[2] = (char)('0' + status_value % 10);
+    name_buffer = status_buffer + 3;
 
+    nva[0].name = (uint8_t *)":status";
+    nva[0].namelen = 7;
+    nva[0].value = (uint8_t *)status_buffer;
+    nva[0].valuelen = 3;
+    nva[0].flags = NGHTTP2_NV_FLAG_NONE;
+
+    append_native_headers(aTHX_ nva, 1, &view.headers, name_buffer);
     *count_out = count;
     return nva;
 }
@@ -1149,14 +1097,20 @@ static unblock_h2_session *
 new_session(pTHX_ HV *callbacks_hv, int server)
 {
     unblock_h2_session *ps;
+    uhttp_native_api uniform_api;
     nghttp2_session_callbacks *callbacks = NULL;
     nghttp2_option *option = NULL;
     int rv;
+
+    if (!uhttp_native_init(aTHX_ &uniform_api, UHTTP_NATIVE_ABI_VERSION)) {
+        croak("Uniform::HTTP 0.06 native ABI is unavailable or incompatible");
+    }
 
     ps = (unblock_h2_session *)calloc(1, sizeof(*ps));
     if (!ps) {
         croak("unable to allocate HTTP/2 session");
     }
+    ps->uniform_api = uniform_api;
 
     load_callbacks(aTHX_ ps, callbacks_hv);
     rv = configure_callbacks(aTHX_ &callbacks);
@@ -1498,9 +1452,9 @@ get_stream_local_close(self, stream_id)
         RETVAL
 
 int
-_submit_request_uniform_native(self, view_av, provider_sv)
+_submit_request_uniform_native(self, message, provider_sv)
         SV *self
-        AV *view_av
+        SV *message
         SV *provider_sv
     PREINIT:
         unblock_h2_session *ps;
@@ -1512,7 +1466,7 @@ _submit_request_uniform_native(self, view_av, provider_sv)
         int32_t stream_id;
     CODE:
         ps = session_from_sv(aTHX_ self);
-        nva = uniform_request_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_request_to_nva(aTHX_ ps, message, &nvlen);
 
         if (SvOK(provider_sv)) {
             if (!SvROK(provider_sv) || SvTYPE(SvRV(provider_sv)) != SVt_PVCV) {
@@ -1600,10 +1554,10 @@ _submit_request_native(self, headers_av, provider_sv)
         RETVAL
 
 int
-_submit_response_uniform_no_body_native(self, stream_id, view_av)
+_submit_response_uniform_no_body_native(self, stream_id, message)
         SV *self
         int stream_id
-        AV *view_av
+        SV *message
     PREINIT:
         unblock_h2_session *ps;
         nghttp2_nv *nva;
@@ -1611,7 +1565,7 @@ _submit_response_uniform_no_body_native(self, stream_id, view_av)
         int rv;
     CODE:
         ps = session_from_sv(aTHX_ self);
-        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_response_to_nva(aTHX_ ps, message, &nvlen);
         rv = nghttp2_submit_response(ps->session, stream_id, nva, nvlen, NULL);
         if (nva) free(nva);
         if (rv != 0) {
@@ -1623,10 +1577,10 @@ _submit_response_uniform_no_body_native(self, stream_id, view_av)
         RETVAL
 
 int
-_submit_response_uniform_streaming_native(self, stream_id, view_av, provider_sv)
+_submit_response_uniform_streaming_native(self, stream_id, message, provider_sv)
         SV *self
         int stream_id
-        AV *view_av
+        SV *message
         SV *provider_sv
     PREINIT:
         unblock_h2_session *ps;
@@ -1644,7 +1598,7 @@ _submit_response_uniform_streaming_native(self, stream_id, view_av, provider_sv)
             croak("response data provider must be a coderef");
         }
 
-        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_response_to_nva(aTHX_ ps, message, &nvlen);
         provider = (unblock_h2_provider *)calloc(1, sizeof(*provider));
         if (!provider) {
             if (nva) free(nva);
@@ -1740,10 +1694,10 @@ _submit_response_streaming_native(self, stream_id, headers_av, provider_sv)
         RETVAL
 
 int
-_submit_response_headers_uniform_native(self, stream_id, view_av, end_stream)
+_submit_response_headers_uniform_native(self, stream_id, message, end_stream)
         SV *self
         int stream_id
-        AV *view_av
+        SV *message
         int end_stream
     PREINIT:
         unblock_h2_session *ps;
@@ -1753,7 +1707,7 @@ _submit_response_headers_uniform_native(self, stream_id, view_av, end_stream)
         uint8_t flags;
     CODE:
         ps = session_from_sv(aTHX_ self);
-        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_response_to_nva(aTHX_ ps, message, &nvlen);
         flags = end_stream ? NGHTTP2_FLAG_END_STREAM : NGHTTP2_FLAG_NONE;
         rv = nghttp2_submit_headers(
             ps->session, flags, stream_id, NULL, nva, nvlen, NULL);
