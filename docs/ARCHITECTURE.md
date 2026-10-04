@@ -87,6 +87,11 @@ The server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL by default because the
 engine understands the generic Extended CONNECT message form. A host can turn
 that advertisement off.
 
+The client queries libnghttp2's effective remote SETTINGS before sending
+Extended CONNECT. It refuses :protocol until the peer has advertised
+SETTINGS_ENABLE_CONNECT_PROTOCOL = 1. The same remote SETTINGS view is used to
+cap locally opened streams by the peer's SETTINGS_MAX_CONCURRENT_STREAMS.
+
 ## Streams
 
 One Unblock::HTTP2::Stream represents one HTTP/2 stream.
@@ -143,8 +148,9 @@ uses that value when initiating GOAWAY. The client advertises ENABLE_PUSH = 0,
 so its locally initiated GOAWAY can use last-stream-id zero without pretending
 to support server-initiated push streams.
 
-Received GOAWAY also places the engine in draining state. Retry policy for work
-the peer did not process remains above this engine.
+Received GOAWAY also places the engine in draining state. The engine preserves
+the peer's last stream ID, HTTP/2 error code, and debug data so a higher layer
+can make its own retry decision. Retry policy remains above this engine.
 
 ## Reentrancy
 
@@ -193,10 +199,16 @@ control.
 
 ## nghttp2
 
-Net::HTTP2::nghttp2 remains the low-level protocol backend.
+libnghttp2 remains the low-level protocol engine. It owns frame
+encoding/decoding, HPACK, HTTP/2 state validation, SETTINGS mechanics, and
+connection/stream flow control.
 
-libnghttp2 owns frame encoding/decoding, HPACK, HTTP/2 state validation,
-SETTINGS mechanics, and connection/stream flow control.
+Unblock::HTTP2 talks to libnghttp2 through the private
+Unblock::HTTP2::_nghttp2 XS binding in this distribution. The binding is kept
+small: it exposes protocol facts and operations needed by Unblock, including
+memory I/O, callbacks, DATA providers, remote SETTINGS, generic HEADERS,
+trailers, RST_STREAM, and GOAWAY details.
 
-Unblock::HTTP2 owns the Perl-facing stream/message mapping and portable
-byte-engine boundary around that backend.
+The private binding does not know about Uniform::HTTP and is not a supported
+public API. Unblock::HTTP2 owns the Perl-facing stream/message mapping and the
+portable byte-engine boundary around libnghttp2.
