@@ -2495,6 +2495,13 @@ _available()
     OUTPUT:
         RETVAL
 
+UV
+_native_transport_operations_address()
+    CODE:
+        RETVAL = PTR2UV(&ub_http2_native_ops);
+    OUTPUT:
+        RETVAL
+
 const char *
 version_string()
     CODE:
