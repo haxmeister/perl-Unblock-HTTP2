@@ -1,92 +1,105 @@
 # Backend requirements
 
-Unblock::HTTP2 uses Net::HTTP2::nghttp2 as its libnghttp2 binding.
+Unblock::HTTP2 uses libnghttp2 directly through the private
+Unblock::HTTP2::_nghttp2 XS binding contained in this distribution.
 
-The byte engine should not duplicate nghttp2 frame parsing merely to work
-around missing Perl binding accessors. This file records backend capabilities
-that are needed for a complete Unblock HTTP/2 engine but are not exposed by
-Net::HTTP2::nghttp2 0.011.
+The binding is intentionally small. It exists to expose the libnghttp2
+operations and protocol facts required by Unblock without creating another
+public HTTP/2 API.
+
+## Responsibilities
+
+libnghttp2 remains responsible for:
+
+- HTTP/2 frame encoding and decoding
+- HPACK
+- protocol validation
+- stream state
+- SETTINGS state
+- flow control
+
+The private binding exposes only the pieces Unblock needs:
+
+- client and server session lifecycle
+- memory input and output
+- frame, header, DATA, error, and stream-close callbacks
+- local SETTINGS submission
+- effective remote SETTINGS queries
+- request and response submission
+- generic HEADERS submission
+- deferred DATA providers and resume
+- trailers
+- RST_STREAM
+- GOAWAY submission and received GOAWAY details
+- stream half-close queries
+
+Uniform::HTTP message construction and validation remain in Perl.
 
 ## Remote SETTINGS
 
-Unblock can advertise local SETTINGS, including
-SETTINGS_ENABLE_CONNECT_PROTOCOL, but the binding does not expose the peer's
-effective SETTINGS values.
+The private binding queries libnghttp2's effective remote SETTINGS directly.
 
-This prevents Unblock from enforcing two important rules itself:
+Unblock uses this to enforce SETTINGS_ENABLE_CONNECT_PROTOCOL before sending
+Extended CONNECT and to combine the local active-stream cap with the peer's
+SETTINGS_MAX_CONCURRENT_STREAMS.
 
-- an Extended CONNECT request must not be sent until the peer has advertised
-  SETTINGS_ENABLE_CONNECT_PROTOCOL = 1
-- the client should use the peer's SETTINGS_MAX_CONCURRENT_STREAMS rather than
-  only a local configured stream limit
+Unblock does not parse SETTINGS frames independently.
 
-Desired backend capability:
+## Informational responses
 
-    $session->get_remote_setting($setting_id)
+Generic non-final HEADERS submission is available through the private binding.
 
-or an equivalent decoded remote-settings API.
+The public server API is Stream->inform($response). It accepts a Uniform
+informational Response and leaves the stream available for later informational
+responses and the final Stream->respond($response).
 
-The underlying libnghttp2 API already has remote-settings state; Unblock should
-consume that state rather than parse SETTINGS frames independently.
+## GOAWAY
 
-## Non-final HEADERS
-
-Uniform::HTTP can represent informational responses such as 100 and 103, and
-the Unblock client can receive them.
-
-Net::HTTP2::nghttp2 0.011 does not expose a generic non-final HEADERS
-submission operation suitable for sending an informational response before the
-final response.
-
-Desired backend capability is a wrapper around the appropriate
-nghttp2_submit_headers behavior, allowing Unblock to send one or more 1xx
-responses without closing the response half of the stream.
-
-The public Unblock API for server informational responses should be added only
-after this primitive is available.
-
-## GOAWAY details
-
-The frame callback currently identifies a GOAWAY frame but does not expose its:
+Received GOAWAY callback data includes:
 
 - last stream ID
 - HTTP/2 error code
-- optional debug data
+- debug data
 
-Unblock can therefore enter draining state, but it cannot yet expose the
-complete peer GOAWAY information to a higher transaction/pooling layer.
+Client and Server retain this as peer_goaway() information while entering
+draining state.
 
-Desired backend behavior is to include those fields in the frame callback data.
-
-Retry policy remains outside Unblock, but callers need the GOAWAY boundary to
-decide which operations might be retried.
+Automatic replay or retry policy remains outside Unblock.
 
 ## Server push
 
-Unblock currently advertises SETTINGS_ENABLE_PUSH = 0 from the client and does
-not expose a public push API.
+Server push is still deliberately not exposed.
 
-A complete optional HTTP/2 push implementation would require the binding to
-expose push-promise submission and the relevant pushed-stream metadata.
+The client advertises SETTINGS_ENABLE_PUSH = 0 until push is intentionally
+given a public Unblock model. The private binding should remain easy to extend
+with PUSH_PROMISE support later, but push is not required by the current
+engine.
 
-Until then, disabling push is preferable to advertising a capability the
-portable engine cannot represent.
+## Portability
 
-## Windows XS build
+The binding must continue to work with:
 
-Alien::nghttp2 0.003 successfully builds libnghttp2 on Strawberry Perl under
-the Unblock Windows CI job.
+- Perl 5.16 and newer
+- threaded and multiplicity Perl builds
+- Linux
+- macOS
+- Strawberry Perl on Windows
 
-Net::HTTP2::nghttp2 0.011 then fails while compiling its XS. The observed
-failure is in perl_send_callback():
+PERL_NO_GET_CONTEXT is enabled. Native callbacks that use Perl APIs establish
+an interpreter context with dTHX. Native storage uses ordinary C allocation,
+so a callback without a Perl context does not accidentally invoke Perl
+allocator macros.
 
-    PERL_NO_GET_CONTEXT is defined
-    realloc expands to Perl's allocator macro
-    the callback has no dTHX declaration
-    Strawberry's multiplicity build therefore has no my_perl context
+Outgoing bytes use nghttp2_session_mem_send directly. The binding does not
+maintain a second send buffer.
 
-The compiler reports my_perl as undeclared at the realloc call.
+## Reentrancy and ownership
 
-This is a binding build issue, not an Unblock or libnghttp2 portability issue.
-Unblock should keep the Windows CI leg so the backend fix can be verified as
-soon as a corrected backend release is available.
+Unblock prevents recursive input/output calls while libnghttp2 is executing.
+
+The binding also defers freeing a DATA provider that is released from inside an
+active libnghttp2 call. Perl callbacks and provider state are released only
+after the native call unwinds.
+
+This protects callback-driven cancellation, connection close, stream close,
+and Perl object destruction from use-after-free and double-free hazards.
