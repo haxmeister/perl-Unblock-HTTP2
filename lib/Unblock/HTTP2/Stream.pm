@@ -99,6 +99,21 @@ sub cancel {
     return $self;
 }
 
+sub _set_callback {
+    my ($self, $name, $callback) = @_;
+    croak "_set_callback(): callback must be a coderef"
+        if defined($callback) && ref($callback) ne 'CODE';
+
+    if ($callback) {
+        $self->{callbacks}{$name} = $callback;
+    }
+    else {
+        delete $self->{callbacks}{$name};
+    }
+
+    return $self;
+}
+
 sub _set_response {
     my ($self, $response) = @_;
     croak 'Stream already has a Response' if $self->{response};
