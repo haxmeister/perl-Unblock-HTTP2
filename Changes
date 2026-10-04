@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP2
 
-0.04  2026-10-04
+Next
     - Require Uniform::HTTP 0.06 for its header-only native C ABI.
     - Inspect exact canonical outgoing Request and Response objects directly
       from XS without allocating a Perl FastPath view.
