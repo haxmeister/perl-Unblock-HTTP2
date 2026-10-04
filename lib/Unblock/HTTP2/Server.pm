@@ -95,14 +95,11 @@ sub new {
     weaken($weak);
 
     my $session = Unblock::HTTP2::_nghttp2::Session->new_server(
+        max_header_list_size => $self->{max_header_list_size},
         callbacks => {
             on_begin_headers => sub {
                 my $self = $weak or return 0;
                 return $self->_on_begin_headers(@_);
-            },
-            on_header => sub {
-                my $self = $weak or return 0;
-                return $self->_on_header(@_);
             },
             on_frame_recv => sub {
                 my $self = $weak or return 0;
@@ -157,59 +154,15 @@ sub drain {
 }
 
 sub _on_begin_headers {
-    my ($self, $stream_id, $frame_type, $flags) = @_;
+    my ($self, $stream_id) = @_;
 
     $self->{last_peer_stream_id} = $stream_id
         if $stream_id > $self->{last_peer_stream_id};
 
-    my $state = $self->{receive}{$stream_id} ||= {
-        header_block          => [],
-        trailer_block         => [],
-        collecting            => 'initial',
-        header_list_size      => 0,
-        header_limit_exceeded => 0,
-        request_end_called    => 0,
+    $self->{receive}{$stream_id} ||= {
+        request_end_called => 0,
     };
 
-    $state->{header_list_size} = 0;
-    $state->{header_limit_exceeded} = 0;
-
-    if ($self->transaction_for_stream_id($stream_id)) {
-        $state->{trailer_block} = [];
-        $state->{collecting} = 'trailer';
-    }
-    else {
-        $state->{header_block} = [];
-        $state->{collecting} = 'initial';
-    }
-
-    return 0;
-}
-
-sub _on_header {
-    my ($self, $stream_id, $name, $value, $flags) = @_;
-    my $state = $self->{receive}{$stream_id} or return 0;
-    return 0 if $state->{header_limit_exceeded};
-
-    my $size = $state->{header_list_size}
-        + length($name) + length($value) + 32;
-
-    if ($size > $self->{max_header_list_size}) {
-        $state->{header_limit_exceeded} = 1;
-        $self->_stream_failure(
-            $stream_id,
-            'HTTP/2 request header list exceeds configured limit',
-            H2_ENHANCE_YOUR_CALM,
-        );
-        return 0;
-    }
-
-    $state->{header_list_size} = $size;
-
-    my $key = $state->{collecting} eq 'trailer'
-        ? 'trailer_block'
-        : 'header_block';
-    push @{ $state->{$key} }, [ $name, $value ];
     return 0;
 }
 
@@ -236,22 +189,26 @@ sub _on_frame_recv {
     return 0 unless $stream_id;
 
     my $state = $self->{receive}{$stream_id} or return 0;
-    return 0 if $state->{header_limit_exceeded};
 
     if (($frame->{type} // -1) == H2_HEADERS) {
+        if (defined $frame->{header_error}) {
+            $self->_stream_failure(
+                $stream_id,
+                "$frame->{header_error}",
+                $frame->{header_error_code},
+            );
+            return 0;
+        }
+
         my $transaction = $self->transaction_for_stream_id($stream_id);
 
         if (!$transaction) {
-            my $request = eval {
-                Unblock::HTTP2::_Headers->request_from_headers(
-                    $state->{header_block},
-                    end_stream => (($frame->{flags} || 0) & H2_END_STREAM)
-                        ? 1 : 0,
-                );
-            };
-
+            my $request = $frame->{uniform_message};
             if (!$request) {
-                $self->_stream_failure($stream_id, "$@");
+                $self->_stream_failure(
+                    $stream_id,
+                    'HTTP/2 request header block did not produce a Uniform request',
+                );
                 return 0;
             }
 
@@ -289,7 +246,7 @@ sub _on_frame_recv {
         my $ok = eval {
             Unblock::HTTP2::_Headers->apply_trailers(
                 $transaction->request,
-                $state->{trailer_block},
+                $frame->{native_headers} || [],
             );
             1;
         };
@@ -309,6 +266,7 @@ sub _on_frame_recv {
 
     return 0;
 }
+
 sub _on_data_chunk_recv {
     my ($self, $stream_id, $data, $flags) = @_;
     my $transaction = $self->transaction_for_stream_id($stream_id) or return 0;
