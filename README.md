@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP2
 ```
 
-Unblock::HTTP2 0.01 requires Perl 5.16 or newer.
+Unblock::HTTP2 0.02 requires Perl 5.16 or newer.
 
 The distribution uses:
 
@@ -58,6 +58,9 @@ The public API is built around three objects:
 
 HTTP messages are normal `Uniform::HTTP::Request` and
 `Uniform::HTTP::Response` objects.
+
+Canonical Uniform::HTTP 0.05 messages use its native FastPath ABI. Uniform
+subclasses and framework adapters continue to use the portable message API.
 
 The basic transport contract is byte-in, byte-out:
 
@@ -297,8 +300,8 @@ nghttp2 tools:
 - Unblock client -> nghttpd server
 - nghttp client -> Unblock server
 
-The TCP interoperability harness lives under `xt/` and is not included in the
-CPAN distribution.
+The interoperability and performance harnesses live under `xt/` and are not
+included in the CPAN distribution.
 
 ## More documentation
 
@@ -311,7 +314,7 @@ CPAN distribution.
 
 ## Status
 
-Unblock::HTTP2 0.01 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.02 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 engine.
 
 Future work can focus on bug fixes, interoperability, performance, or optional
