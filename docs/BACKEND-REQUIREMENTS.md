@@ -39,6 +39,10 @@ The Perl layer needs:
 The binding returns protocol facts. It does not create Uniform::HTTP objects or
 make application policy decisions.
 
+For exact canonical Uniform::HTTP messages, it may consume a versioned
+Uniform::HTTP FastPath view. The portable Perl path remains required for
+subclasses and adapters.
+
 ## SETTINGS
 
 Received SETTINGS identifier/value pairs are exposed to Perl so Unblock can
