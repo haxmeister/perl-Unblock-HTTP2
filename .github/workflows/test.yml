@@ -50,18 +50,11 @@ jobs:
           ref: feature/unblock-http2-support
           path: _uniform_http
 
-      - name: Build and install Uniform
+      - name: Use Uniform development contract
         run: |
-          cd _uniform_http
-          cpanm --notest Crypt::SysRandom
-          cpanm --notest --installdeps .
-          perl Makefile.PL
-          MAKE=$(perl -MConfig -e 'print $Config{make}')
-          "$MAKE"
-          "$MAKE" test
-          "$MAKE" install
-          cd ..
-          rm -rf _uniform_http
+          UNIFORM_LIB=$(cd _uniform_http && perl -MCwd=abs_path -MConfig -e 'print abs_path("lib")')
+          PATH_SEP=$(perl -MConfig -e 'print $Config{path_sep}')
+          echo "PERL5LIB=$UNIFORM_LIB$PATH_SEP$PERL5LIB" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |
