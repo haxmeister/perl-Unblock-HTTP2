@@ -81,7 +81,7 @@ protocol layers.
 
 ### Optional extension frames
 
-Optional extensions such as ORIGIN and ALTSVC are not required for the 0.01
+Optional extensions such as ORIGIN and ALTSVC are not required for the 0.02
 core.
 
 Unknown frame types are safely ignored as required by HTTP/2.
