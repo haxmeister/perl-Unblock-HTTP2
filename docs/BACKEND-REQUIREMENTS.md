@@ -31,6 +31,7 @@ The private binding exposes only the pieces Unblock needs:
 - deferred DATA providers and resume
 - trailers
 - RST_STREAM
+- PING submission and received opaque-data details
 - GOAWAY submission and received GOAWAY details
 - stream half-close queries
 - disabled automatic receive WINDOW_UPDATE
@@ -74,6 +75,15 @@ Generic non-final HEADERS submission is available through the private binding.
 The public server API is Stream->inform($response). It accepts a Uniform
 informational Response and leaves the stream available for later informational
 responses and the final Stream->respond($response).
+
+## PING
+
+The private binding exposes nghttp2_submit_ping for non-ACK PING submission and
+includes the eight opaque payload bytes on received PING frame callbacks.
+libnghttp2's automatic PING ACK behavior remains enabled.
+
+The public layer distinguishes PING from PING ACK using the frame ACK flag. It
+does not disable automatic acknowledgement or implement liveness timers.
 
 ## GOAWAY
 
