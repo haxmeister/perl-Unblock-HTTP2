@@ -29,6 +29,7 @@ The private binding exposes only the pieces Unblock needs:
 - invalid non-DATA frame callbacks with frame metadata and nghttp2 error codes
 - RFC 9218 PRIORITY_UPDATE submission and built-in receive processing
 - request and response submission
+- GOAWAY submission with explicit last-stream id, error code, and debug bytes
 - generic HEADERS submission
 - deferred DATA providers and resume
 - trailers
