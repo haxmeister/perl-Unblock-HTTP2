@@ -32,6 +32,9 @@ Revision history for Unblock-HTTP2
     - Add RFC 9218 extensible prioritization with
       SETTINGS_NO_RFC7540_PRIORITIES, ordinary Priority headers,
       client Stream->update_priority(), and server on_priority observation.
+    - Preserve RST_STREAM error codes with public RFC constants,
+      Stream->reset(), error_code/error_name/reset_by_peer accessors, and
+      reset codes passed through error callbacks for higher-layer retry policy.
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.
