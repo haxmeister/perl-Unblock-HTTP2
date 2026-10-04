@@ -29,6 +29,9 @@ Revision history for Unblock-HTTP2
       RFC value validation, and no private nghttp2 session access.
     - Add connection-level PING with exact eight-byte opaque payloads, distinct
       PING/PING-ACK callbacks, automatic protocol ACKs, and no keepalive policy.
+    - Add RFC 9218 extensible prioritization with
+      SETTINGS_NO_RFC7540_PRIORITIES, ordinary Priority headers,
+      client Stream->update_priority(), and server on_priority observation.
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.
