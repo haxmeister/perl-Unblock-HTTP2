@@ -1,0 +1,56 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        perl:
+          - '5.16'
+          - 'latest'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+
+      - name: Install nghttp2 development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev pkg-config
+
+      - name: Install Uniform development contract
+        uses: actions/checkout@v4
+        with:
+          repository: haxmeister/perl-Uniform-HTTP
+          ref: feature/unblock-http2-support
+          path: _uniform_http
+
+      - name: Build and install Uniform
+        run: |
+          cd _uniform_http
+          perl Makefile.PL
+          make
+          make test
+          make install
+
+      - name: Install dependencies
+        run: cpanm --notest --installdeps .
+
+      - name: Build and test
+        run: |
+          perl Makefile.PL
+          make test
+
+      - name: Check POD syntax
+        run: |
+          find lib -name '*.pm' -print0 | xargs -0 -n1 podchecker
