@@ -171,6 +171,18 @@ The private binding remains responsible for SETTINGS frame processing and
 effective state. It only exposes the received identifier/value pairs needed to
 describe peer changes without exposing nghttp2 objects to callers.
 
+## PING control frames
+
+PING is exposed as a connection-level protocol primitive. ping($opaque)
+requires exactly eight bytes and submits one non-ACK PING. Received PING and
+PING ACK frames preserve those bytes and are surfaced separately through
+on_ping and on_ping_ack.
+
+libnghttp2 retains responsibility for protocol validation and for automatically
+submitting the mandatory ACK to a non-ACK PING. Unblock does not add timer,
+keepalive, health-check, or timeout policy. A host can measure round-trip time
+or decide when a missing ACK matters without changing the protocol engine.
+
 ## Graceful draining
 
 Client and Server expose drain() as the graceful connection-shutdown operation.
