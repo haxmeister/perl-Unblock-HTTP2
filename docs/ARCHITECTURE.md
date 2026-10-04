@@ -149,6 +149,22 @@ when end() is called.
 Incoming trailing HEADERS are validated as ordinary HTTP/2 fields, added to the
 Uniform trailer section, then frozen before message completion is reported.
 
+## Stream reset facts
+
+RST_STREAM is a transport-protocol fact, while retry policy belongs above the
+engine. Unblock therefore preserves the numeric HTTP/2 error code on Stream
+objects and records whether the reset was received from the peer or initiated
+locally.
+
+cancel() is the convenience form for the CANCEL code. reset($error_code)
+allows a caller to submit another explicit 32-bit HTTP/2 error code, such as
+REFUSED_STREAM. Incoming reset codes are passed through to stream and server
+error callbacks as an additional argument.
+
+Unblock::HTTP2 publishes the standard RFC error-code constants and can map
+known numeric values back to symbolic names. It does not automatically retry a
+REFUSED_STREAM or reinterpret one reset reason as another.
+
 ## SETTINGS control plane
 
 SETTINGS is part of the public protocol engine rather than a private backend
