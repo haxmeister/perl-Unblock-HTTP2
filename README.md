@@ -63,7 +63,9 @@ The application-facing exchange object is a `Transaction`. HTTP/2 protocol
 terms such as stream ID, RST_STREAM, stream flow control, and
 MAX_CONCURRENT_STREAMS keep their RFC names.
 
-Canonical Uniform::HTTP 0.05 messages use its native FastPath ABI. Uniform
+Canonical Uniform::HTTP 0.06 messages use its native C ABI directly. The XS
+binding inspects outgoing canonical objects without a Perl FastPath view and
+builds received canonical objects from validated native header spans. Uniform
 subclasses and framework adapters continue to use the portable message API.
 
 The basic transport contract is byte-in, byte-out:
