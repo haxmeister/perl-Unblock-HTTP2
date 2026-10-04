@@ -11,6 +11,8 @@ Next
     - Keep Uniform subclasses and adapters on the portable Perl contract.
     - Preserve HTTP/2 validation, header-list limits, informational responses,
       Extended CONNECT, trailers, and lifecycle semantics on the native path.
+    - In the seven-sample CI comparison against current main, median canonical
+      submit rate improved 73.5% and full in-memory loopback improved 173.6%.
 
 0.03  2026-10-04
     - Rename the public per-request object from Stream to Transaction so
