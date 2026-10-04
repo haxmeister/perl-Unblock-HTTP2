@@ -220,6 +220,18 @@ submitting the mandatory ACK to a non-ACK PING. Unblock does not add timer,
 keepalive, health-check, or timeout policy. A host can measure round-trip time
 or decide when a missing ACK matters without changing the protocol engine.
 
+## Fatal session failures
+
+input() and output() are the boundary around nghttp2 memory I/O. A negative or
+otherwise fatal nghttp2 receive/send result is surfaced as a Perl exception,
+but the engine first transitions to closed state and fails any still-active
+streams. close_reason() retains the failure text.
+
+This is intentionally different from an invalid HTTP/2 frame that nghttp2 can
+handle at the protocol layer by queuing RST_STREAM or GOAWAY. Recoverable
+protocol handling keeps the session alive as allowed by nghttp2; fatal backend
+failure makes the Unblock engine unusable.
+
 ## Frame validation and extension behavior
 
 libnghttp2 remains authoritative for HTTP/2 frame and connection-state
