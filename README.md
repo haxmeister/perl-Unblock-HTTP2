@@ -1,5 +1,12 @@
 # Unblock::HTTP2
 
+[![CPAN version](https://badge.fury.io/pl/Unblock-HTTP2.svg)](https://metacpan.org/dist/Unblock-HTTP2)
+[![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP2.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP2)
+[![CI](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/test.yml)
+[![License](https://img.shields.io/cpan/l/Unblock-HTTP2.svg)](https://github.com/haxmeister/perl-Unblock-HTTP2/blob/main/LICENSE)
+[![Perl](https://img.shields.io/badge/perl-5.16%2B-blue.svg)](https://www.perl.org/)
+[![HTTP/2](https://img.shields.io/badge/HTTP%2F2-RFC%209113-blue.svg)](https://www.rfc-editor.org/rfc/rfc9113)
+
 Event-loop and operating-system neutral HTTP/2 for Perl.
 
 Unblock::HTTP2 is a protocol engine. It does not open sockets, negotiate TLS,
@@ -19,6 +26,19 @@ The caller takes bytes back out with:
 
 This makes the same engine usable with Linux::Event, IO::Async, AnyEvent,
 Mojolicious, blocking sockets, in-memory transports, and other environments.
+
+## Installation
+
+Install from CPAN with:
+
+    cpanm Unblock::HTTP2
+
+or:
+
+    cpan Unblock::HTTP2
+
+The distribution builds a small private XS binding against libnghttp2.
+Alien::nghttp2 supplies the build flags and library dependency.
 
 ## Message objects
 
@@ -471,15 +491,17 @@ binding is an implementation detail, not a public API.
 
 The intended Perl compatibility floor is Perl 5.16.
 
-## Development status
+## Status
 
-The distribution is under active development and has not been released.
+The core HTTP/2 protocol engine is feature-complete for the 0.001 release line.
+The test suite includes complete client/server exchanges entirely in memory,
+including streaming bodies, multiplexing, cancellation isolation, header-list
+limits, trailers, informational responses, peer SETTINGS enforcement, GOAWAY,
+receive flow control, PING, RFC 9218 priority updates, reset codes, and Extended
+CONNECT.
 
-The development suite includes complete HTTP/2 client/server exchanges entirely
-in memory, including streaming bodies, multiplexing, cancellation isolation,
-header-list limits, trailers, informational responses, peer SETTINGS
-enforcement, GOAWAY details, and Extended CONNECT. No socket, TLS
-implementation, or event loop is involved in those tests.
+The CI release gate also runs the suite from the generated distribution tree.
+No socket, TLS implementation, or event loop is required by the protocol tests.
 
 ## License
 
