@@ -69,10 +69,10 @@ for my $target ('/one', '/two', '/three') {
     push @streams, $stream;
 }
 
-is $client->stream_count, 3,
-    'three client streams are active before transport pumping';
-is_deeply [ map { $_->id } @streams ], [ 1, 3, 5 ],
-    'client streams use independent HTTP/2 stream ids';
+is $client->transaction_count, 3,
+    'three client transactions are active before transport pumping';
+is_deeply [ map { $_->stream_id } @streams ], [ 1, 3, 5 ],
+    'client transactions expose independent HTTP/2 stream ids';
 
 pump_until($client, $server, sub { $complete == 3 });
 

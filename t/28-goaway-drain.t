@@ -61,14 +61,14 @@ sub request_for {
     is_deeply(
         $client->peer_goaway,
         {
-            last_stream_id => $stream->id,
+            last_stream_id => $stream->stream_id,
             error_code     => 0,
             debug_data     => '',
         },
         'client retains the complete peer GOAWAY boundary',
     );
 
-    ok !$client->can_open_stream,
+    ok !$client->can_open_transaction,
         'client refuses new streams after GOAWAY';
 
     my $ok = eval {
@@ -77,7 +77,7 @@ sub request_for {
     };
     ok !$ok,
         'request() refuses a new stream while connection drains';
-    like $@, qr/cannot accept another stream/,
+    like $@, qr/cannot accept another transaction/,
         'new-stream refusal is explicit';
 
     $active->respond(
@@ -119,7 +119,7 @@ sub request_for {
         },
         'server retains peer GOAWAY details',
     );
-    ok !$client->can_open_stream,
+    ok !$client->can_open_transaction,
         'locally draining client cannot open a request stream';
 }
 

@@ -42,7 +42,7 @@ my $client = Unblock::HTTP2::Client->new(
 
 pump_until_idle($client, $server);
 
-ok $client->can_open_stream,
+ok $client->can_open_transaction,
     'client can open a stream before reaching the peer limit';
 
 my $first = $client->request(
@@ -53,7 +53,7 @@ my $first = $client->request(
     },
 );
 
-ok !$client->can_open_stream,
+ok !$client->can_open_transaction,
     'peer SETTINGS_MAX_CONCURRENT_STREAMS is stricter than local limit';
 
 my $ok = eval {
@@ -62,7 +62,7 @@ my $ok = eval {
 };
 ok !$ok,
     'request refuses a stream beyond the peer-advertised limit';
-like $@, qr/cannot accept another stream/,
+like $@, qr/cannot accept another transaction/,
     'peer stream-limit refusal uses the normal capacity error';
 
 pump_until($client, $server, sub { @server_streams == 1 });
@@ -78,7 +78,7 @@ pump_until($client, $server, sub { $first->is_terminal });
 
 ok $first->is_complete,
     'first stream completes normally';
-ok $client->can_open_stream,
+ok $client->can_open_transaction,
     'capacity returns after the peer-limited stream closes';
 is_deeply \@errors, [],
     'remote stream-limit handling reports no protocol errors';
