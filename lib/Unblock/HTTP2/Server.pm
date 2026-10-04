@@ -370,9 +370,9 @@ sub _on_invalid_frame {
 sub _inform_stream {
     my ($self, $transaction, $response) = @_;
 
-    my $fast_view = Unblock::HTTP2::_Headers->fast_view($response);
+    my $native_message = Unblock::HTTP2::_Headers->native_message($response);
     croak 'inform(): requires the Uniform HTTP response contract'
-        unless $fast_view
+        unless $native_message
             || Unblock::HTTP2::_Headers::_response_contract($response);
     croak 'inform(): final Response already submitted'
         if $transaction->response;
@@ -391,10 +391,10 @@ sub _inform_stream {
     croak 'inform(): informational Response must not have trailers'
         if @$trailers;
 
-    if ($fast_view) {
+    if ($native_message) {
         $self->{session}->submit_response_headers_uniform(
             $transaction->stream_id,
-            $fast_view,
+            $native_message,
         );
     }
     else {
@@ -411,9 +411,9 @@ sub _inform_stream {
 sub _respond_stream {
     my ($self, $transaction, $response, %option) = @_;
 
-    my $fast_view = Unblock::HTTP2::_Headers->fast_view($response);
+    my $native_message = Unblock::HTTP2::_Headers->native_message($response);
     croak 'respond(): requires the Uniform HTTP response contract'
-        unless $fast_view
+        unless $native_message
             || Unblock::HTTP2::_Headers::_response_contract($response);
     croak 'respond(): Transaction already has a Response'
         if $transaction->response;
@@ -441,7 +441,7 @@ sub _respond_stream {
         if $stream_body && $response->has_buffered_body;
 
     my ($block, @headers);
-    if (!$fast_view) {
+    if (!$native_message) {
         $block = Unblock::HTTP2::_Headers->response_headers($response);
         @headers = @$block[1 .. $#$block];
     }
@@ -476,10 +476,10 @@ sub _respond_stream {
             return $self->_provide_body($provider, @_);
         };
 
-        if ($fast_view) {
+        if ($native_message) {
             $self->{session}->submit_response_uniform(
                 $transaction->stream_id,
-                $fast_view,
+                $native_message,
                 data_callback => $data_callback,
             );
         }
@@ -493,10 +493,10 @@ sub _respond_stream {
         }
     }
     elsif ($response->has_buffered_body) {
-        if ($fast_view) {
+        if ($native_message) {
             $self->{session}->submit_response_uniform(
                 $transaction->stream_id,
-                $fast_view,
+                $native_message,
                 body => $response->body,
             );
         }
@@ -510,10 +510,10 @@ sub _respond_stream {
         }
     }
     else {
-        if ($fast_view) {
+        if ($native_message) {
             $self->{session}->submit_response_uniform(
                 $transaction->stream_id,
-                $fast_view,
+                $native_message,
             );
         }
         else {
