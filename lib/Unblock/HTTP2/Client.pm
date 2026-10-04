@@ -45,11 +45,9 @@ sub new {
     croak 'new(): unknown options: ' . join(', ', sort keys %option)
         if %option;
 
-    require Net::HTTP2::nghttp2;
-    Net::HTTP2::nghttp2->VERSION('0.011');
-    require Net::HTTP2::nghttp2::Session;
+    require Unblock::HTTP2::_nghttp2;
     croak 'new(): nghttp2 library is unavailable'
-        unless Net::HTTP2::nghttp2->available;
+        unless Unblock::HTTP2::_nghttp2->available;
 
     my $self = bless {
         draining             => 0,
@@ -57,12 +55,13 @@ sub new {
         max_header_list_size => 0 + $max_header_list_size,
         receive              => {},
         providers            => {},
+        peer_goaway           => undef,
     }, $class;
 
     my $weak = $self;
     weaken($weak);
 
-    my $session = Net::HTTP2::nghttp2::Session->new_client(
+    my $session = Unblock::HTTP2::_nghttp2::Session->new_client(
         callbacks => {
             on_begin_headers => sub {
                 my $self = $weak or return 0;
@@ -102,6 +101,12 @@ sub draining {
     return $_[0]{draining} ? 1 : 0;
 }
 
+sub peer_goaway {
+    my ($self) = @_;
+    return unless $self->{peer_goaway};
+    return { %{ $self->{peer_goaway} } };
+}
+
 sub drain {
     my ($self) = @_;
     return $self if $self->is_closed || $self->{draining};
@@ -117,7 +122,14 @@ sub drain {
 sub can_open_stream {
     my ($self) = @_;
     return 0 if $self->is_closed || $self->{draining};
-    return $self->stream_count < $self->{max_active_streams} ? 1 : 0;
+
+    my $limit = $self->{max_active_streams};
+    my $peer_limit = $self->{session}->remote_setting(
+        Unblock::HTTP2::_nghttp2::SETTINGS_MAX_CONCURRENT_STREAMS(),
+    );
+    $limit = $peer_limit if $peer_limit < $limit;
+
+    return $self->stream_count < $limit ? 1 : 0;
 }
 
 sub request {
@@ -128,6 +140,14 @@ sub request {
         unless $self->can_open_stream;
     croak 'request(): requires the Uniform HTTP request contract'
         unless Unblock::HTTP2::_Headers::_request_contract($request);
+
+    if (defined($request->protocol) && length($request->protocol)) {
+        my $enabled = $self->{session}->remote_setting(
+            Unblock::HTTP2::_nghttp2::SETTINGS_ENABLE_CONNECT_PROTOCOL(),
+        );
+        croak 'request(): peer has not enabled Extended CONNECT'
+            unless $enabled == 1;
+    }
 
     my $stream_body = exists($option{stream_body})
         ? delete($option{stream_body})
@@ -327,6 +347,13 @@ sub _on_frame_recv {
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
+        $self->{peer_goaway} = {
+            last_stream_id => 0 + ($frame->{last_stream_id} // 0),
+            error_code     => 0 + ($frame->{error_code} // 0),
+            debug_data     => defined($frame->{debug_data})
+                ? "$frame->{debug_data}"
+                : '',
+        };
         return 0;
     }
 
@@ -540,6 +567,10 @@ sub _write_stream_body {
     $provider->{blocked} = 1 if $blocked;
     return $blocked ? 0 : 1;
 }
+sub _inform_stream {
+    croak 'inform(): client-side streams cannot send Responses';
+}
+
 sub _respond_stream {
     croak 'respond(): client-side streams cannot send Responses';
 }
