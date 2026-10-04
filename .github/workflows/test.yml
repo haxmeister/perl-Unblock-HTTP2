@@ -48,7 +48,9 @@ jobs:
           rm -rf _uniform_http
 
       - name: Install dependencies
-        run: cpanm --notest --installdeps .
+        run: |
+          cpanm --notest Net::HTTP2::nghttp2
+          cpanm --notest --installdeps .
 
       - name: Build and test
         run: |
