@@ -274,6 +274,32 @@ cannot later be reset to 0.
 The client keeps SETTINGS_ENABLE_PUSH at 0 because server push is not part of
 the public Unblock API.
 
+## PING
+
+Both endpoints can send an HTTP/2 PING with exactly eight opaque bytes:
+
+    $engine->ping("12345678");
+
+Incoming PING and PING ACK frames can be observed independently:
+
+    my $client = Unblock::HTTP2::Client->new(
+        on_ping => sub {
+            my ($engine, $opaque) = @_;
+        },
+
+        on_ping_ack => sub {
+            my ($engine, $opaque) = @_;
+        },
+    );
+
+libnghttp2 automatically generates the required ACK for a received PING, and
+Unblock preserves the eight opaque bytes exactly. PING is connection-level; it
+is not associated with a Stream.
+
+Unblock does not implement keepalive intervals, deadlines, liveness policy, or
+round-trip timers. Those decisions belong to the caller or higher connection
+policy.
+
 ## Graceful draining
 
 Both client and server engines can begin a graceful HTTP/2 shutdown with:
