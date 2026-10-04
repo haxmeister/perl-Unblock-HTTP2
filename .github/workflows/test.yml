@@ -6,14 +6,24 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       fail-fast: false
       matrix:
-        perl:
-          - '5.16'
-          - 'latest'
+        include:
+          - os: ubuntu-latest
+            perl: '5.16'
+          - os: ubuntu-latest
+            perl: 'latest'
+          - os: macos-latest
+            perl: 'latest'
+          - os: windows-latest
+            perl: 'latest'
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v4
@@ -23,10 +33,15 @@ jobs:
         with:
           perl-version: ${{ matrix.perl }}
 
-      - name: Install nghttp2 development files
+      - name: Install nghttp2 development files on Linux
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libnghttp2-dev pkg-config
+
+      - name: Install nghttp2 development files on macOS
+        if: runner.os == 'macOS'
+        run: brew install nghttp2 pkg-config
 
       - name: Install Uniform development contract
         uses: actions/checkout@v4
@@ -41,9 +56,10 @@ jobs:
           cpanm --notest Crypt::SysRandom
           cpanm --notest --installdeps .
           perl Makefile.PL
-          make
-          make test
-          make install
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+          "$MAKE" test
+          "$MAKE" install
           cd ..
           rm -rf _uniform_http
 
@@ -55,7 +71,8 @@ jobs:
       - name: Build and test
         run: |
           perl Makefile.PL
-          make test
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE" test
 
       - name: Check POD syntax
         run: |
