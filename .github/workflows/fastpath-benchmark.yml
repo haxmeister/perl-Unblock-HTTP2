@@ -1,9 +1,6 @@
 name: fastpath-benchmark
 
 on:
-  push:
-    branches:
-      - feature/uniform-http-fastpath
   workflow_dispatch:
 
 jobs:
