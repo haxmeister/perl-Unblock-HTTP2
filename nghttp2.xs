@@ -360,6 +360,20 @@ frame_to_hv(pTHX_ const nghttp2_frame *frame)
         hv_store(hv, "opaque_data", 11,
             newSVpvn((const char *)frame->ping.opaque_data, 8), 0);
     }
+    else if (frame->hd.type == NGHTTP2_PRIORITY_UPDATE
+             && frame->ext.payload) {
+        nghttp2_ext_priority_update *priority_update
+            = (nghttp2_ext_priority_update *)frame->ext.payload;
+        hv_store(hv, "prioritized_stream_id", 21,
+            newSViv(priority_update->stream_id), 0);
+        hv_store(hv, "priority_field_value", 20,
+            newSVpvn(
+                priority_update->field_value
+                    ? (const char *)priority_update->field_value
+                    : "",
+                priority_update->field_value_len
+            ), 0);
+    }
     else if (frame->hd.type == NGHTTP2_GOAWAY) {
         hv_store(hv, "last_stream_id", 14,
             newSViv(frame->goaway.last_stream_id), 0);
@@ -739,6 +753,8 @@ new_session(pTHX_ HV *callbacks_hv, int server)
     nghttp2_option_set_no_auto_window_update(option, 1);
 
     if (server) {
+        nghttp2_option_set_builtin_recv_extension_type(
+            option, NGHTTP2_PRIORITY_UPDATE);
         rv = nghttp2_session_server_new2(
             &ps->session, callbacks, ps, option);
     }
@@ -944,7 +960,7 @@ submit_settings(self, settings_hv)
         HV *settings_hv
     PREINIT:
         unblock_h2_session *ps;
-        nghttp2_settings_entry entries[8];
+        nghttp2_settings_entry entries[9];
         size_t count = 0;
         SV **value;
         int rv;
@@ -977,6 +993,10 @@ submit_settings(self, settings_hv)
         }
         if ((value = hv_fetch(settings_hv, "enable_connect_protocol", 23, 0))) {
             entries[count].settings_id = NGHTTP2_SETTINGS_ENABLE_CONNECT_PROTOCOL;
+            entries[count++].value = SvTRUE(*value) ? 1 : 0;
+        }
+        if ((value = hv_fetch(settings_hv, "no_rfc7540_priorities", 21, 0))) {
+            entries[count].settings_id = NGHTTP2_SETTINGS_NO_RFC7540_PRIORITIES;
             entries[count++].value = SvTRUE(*value) ? 1 : 0;
         }
 
@@ -1236,6 +1256,32 @@ submit_rst_stream(self, stream_id, error_code)
             ps->session, NGHTTP2_FLAG_NONE, stream_id, error_code);
         if (rv != 0) {
             croak("nghttp2_submit_rst_stream failed (%d): %s",
+                rv, nghttp2_strerror(rv));
+        }
+        RETVAL = rv;
+    OUTPUT:
+        RETVAL
+
+int
+_submit_priority_update_native(self, stream_id, field_value)
+        SV *self
+        int stream_id
+        SV *field_value
+    PREINIT:
+        unblock_h2_session *ps;
+        STRLEN len = 0;
+        const uint8_t *value;
+        int rv;
+    CODE:
+        ps = session_from_sv(aTHX_ self);
+        value = (const uint8_t *)SvPVbyte(field_value, len);
+        if (len > 16380) {
+            croak("PRIORITY_UPDATE field value exceeds 16380 bytes");
+        }
+        rv = nghttp2_submit_priority_update(
+            ps->session, NGHTTP2_FLAG_NONE, stream_id, value, (size_t)len);
+        if (rv != 0) {
+            croak("nghttp2_submit_priority_update failed (%d): %s",
                 rv, nghttp2_strerror(rv));
         }
         RETVAL = rv;
