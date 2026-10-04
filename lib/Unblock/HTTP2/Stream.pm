@@ -32,9 +32,11 @@ sub _new {
         id         => 0 + $id,
         request    => $request,
         response   => undef,
-        callbacks  => { %$callbacks },
-        state      => 'active',
-        error      => undef,
+        callbacks        => { %$callbacks },
+        state            => 'active',
+        error            => undef,
+        auto_consume     => 1,
+        unconsumed_bytes => 0,
     }, $class;
 
     weaken($self->{connection});
@@ -46,6 +48,7 @@ sub request      { return $_[0]{request} }
 sub response     { return $_[0]{response} }
 sub state        { return $_[0]{state} }
 sub error        { return $_[0]{error} }
+sub unconsumed_bytes { return $_[0]{unconsumed_bytes} }
 sub is_complete  { return $_[0]{state} eq 'complete' ? 1 : 0 }
 sub is_cancelled { return $_[0]{state} eq 'cancelled' ? 1 : 0 }
 sub is_terminal  { return $TERMINAL{$_[0]{state}} ? 1 : 0 }
@@ -107,6 +110,73 @@ sub cancel {
         $self->_mark_cancelled;
     }
 
+    return $self;
+}
+
+sub auto_consume {
+    my ($self, @args) = @_;
+
+    return $self->{auto_consume} ? 1 : 0 unless @args;
+
+    croak 'auto_consume(): accepts exactly one zero-or-one value'
+        unless @args == 1;
+    croak 'auto_consume(): Stream is already terminal'
+        if $self->is_terminal;
+
+    my $value = $args[0];
+    croak 'auto_consume(): value must be zero or one'
+        if !defined($value) || ref($value) || "$value" !~ /\A[01]\z/;
+    $value = $value ? 1 : 0;
+
+    if ($value && !$self->{auto_consume} && $self->{unconsumed_bytes}) {
+        my $connection = $self->{connection}
+            or croak 'auto_consume(): HTTP/2 connection is no longer available';
+
+        my $bytes = $self->{unconsumed_bytes};
+        $connection->_consume_stream_body($self, $bytes);
+        $self->{unconsumed_bytes} -= $bytes;
+    }
+
+    $self->{auto_consume} = $value;
+    return $self;
+}
+
+sub consume {
+    my ($self, $bytes) = @_;
+
+    croak 'consume(): Stream is already terminal' if $self->is_terminal;
+    croak 'consume(): bytes must be a non-negative integer'
+        unless defined($bytes) && !ref($bytes) && "$bytes" =~ /\A[0-9]+\z/;
+
+    $bytes = 0 + $bytes;
+    croak 'consume(): cannot consume more bytes than have been delivered'
+        if $bytes > $self->{unconsumed_bytes};
+    return $self unless $bytes;
+
+    my $connection = $self->{connection}
+        or croak 'consume(): HTTP/2 connection is no longer available';
+
+    $connection->_consume_stream_body($self, $bytes);
+    $self->{unconsumed_bytes} -= $bytes;
+    return $self;
+}
+
+sub _receive_body_bytes {
+    my ($self, $bytes) = @_;
+    $self->{unconsumed_bytes} += $bytes if $bytes;
+    return $self;
+}
+
+sub _auto_consume_body {
+    my ($self) = @_;
+    return $self unless $self->{auto_consume};
+    return $self unless $self->{unconsumed_bytes};
+    return $self if $self->is_terminal;
+
+    my $connection = $self->{connection} or return $self;
+    my $bytes = $self->{unconsumed_bytes};
+    $connection->_consume_stream_body($self, $bytes);
+    $self->{unconsumed_bytes} -= $bytes;
     return $self;
 }
 
@@ -198,5 +268,12 @@ producing more.
 
 Server streams use C<inform()> for non-final informational responses and
 C<respond()> for the final Uniform response.
+
+Incoming body bytes are automatically credited back to the peer after the body
+callback returns. For application-driven receive backpressure, disable that on
+an individual stream with C<auto_consume(0)>. C<unconsumed_bytes()> reports
+delivered bytes that have not yet been credited, and C<consume($bytes)> releases
+that many stream-level flow-control bytes. Re-enable C<auto_consume(1)> to
+release any outstanding bytes and return to automatic consumption.
 
 =cut
