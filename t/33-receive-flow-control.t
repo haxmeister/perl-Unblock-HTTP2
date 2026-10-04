@@ -258,7 +258,7 @@ is $slow_client_stream->unconsumed_bytes, 0,
 ok $slow_client_stream->auto_consume,
     'auto consumption can be re-enabled per stream';
 
-is_deeply @errors, [],
+is_deeply \@errors, [],
     'receive flow-control tests report no protocol errors';
 
 done_testing;
