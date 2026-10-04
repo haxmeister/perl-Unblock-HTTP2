@@ -179,9 +179,10 @@ order and surfaced through on_settings_ack. settings_pending() reports the
 number of locally submitted SETTINGS frames still awaiting ACK.
 
 The public layer validates RFC value ranges before asking libnghttp2 to submit
-a frame. It also enforces extension semantics that are part of the HTTP/2
-protocol surface, including the rule that SETTINGS_ENABLE_CONNECT_PROTOCOL
-cannot be changed from 1 back to 0.
+a frame. It also enforces endpoint-role and extension semantics that are part
+of the HTTP/2 protocol surface: SETTINGS_ENABLE_PUSH can only be sent by a
+client, and SETTINGS_ENABLE_CONNECT_PROTOCOL cannot be changed from 1 back to
+0 after being advertised.
 
 The private binding remains responsible for SETTINGS frame processing and
 effective state. It only exposes the received identifier/value pairs needed to
