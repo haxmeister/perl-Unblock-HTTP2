@@ -81,6 +81,6 @@ WriteMakefile(
     },
 
     clean => {
-        FILES => 'Unblock-HTTP2-* nghttp2.c nghttp2.o',
+        FILES => 'Unblock-HTTP2-* nghttp2.c nghttp2.o nghttp2.obj HTTP2.bs',
     },
 );
