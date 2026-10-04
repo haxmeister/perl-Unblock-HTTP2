@@ -111,6 +111,7 @@ sub new {
         max_concurrent_streams => 100,
         max_header_list_size   => $self->{max_header_list_size},
         enable_push            => 0,
+        no_rfc7540_priorities  => 1,
         %$settings,
     );
     $self->_submit_settings('new()', \%initial_settings);
