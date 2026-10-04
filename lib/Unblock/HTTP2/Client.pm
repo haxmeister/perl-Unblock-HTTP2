@@ -281,7 +281,7 @@ sub _status_from_block {
 sub _on_frame_recv {
     my ($self, $frame) = @_;
 
-    if (($frame->{type} || -1) == H2_GOAWAY) {
+    if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
         return 0;
     }
@@ -294,7 +294,7 @@ sub _on_frame_recv {
 
     my $stream = $self->stream_for_id($stream_id) or return 0;
 
-    if (($frame->{type} || -1) == H2_HEADERS) {
+    if (($frame->{type} // -1) == H2_HEADERS) {
         if (!$state->{response}) {
             my $status = _status_from_block($state->{header_block});
 
@@ -355,7 +355,7 @@ sub _on_frame_recv {
         return 0;
     }
 
-    if (($frame->{type} || -1) == H2_DATA
+    if (($frame->{type} // -1) == H2_DATA
         && (($frame->{flags} || 0) & H2_END_STREAM)) {
         $self->_finish_response($stream_id);
     }
