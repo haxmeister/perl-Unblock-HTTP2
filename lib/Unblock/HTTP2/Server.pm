@@ -30,7 +30,7 @@ sub new {
     my %callbacks;
     for my $name (qw(
         on_request on_body on_request_end on_error
-        on_settings on_settings_ack
+        on_settings on_settings_ack on_ping on_ping_ack
     )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
@@ -221,6 +221,7 @@ sub _on_frame_recv {
     my ($self, $frame) = @_;
 
     return 0 if $self->_handle_settings_frame($frame);
+    return 0 if $self->_handle_ping_frame($frame);
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
