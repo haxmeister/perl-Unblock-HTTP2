@@ -5,8 +5,9 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed);
 
-use Uniform::HTTP::Request 0.04;
-use Uniform::HTTP::Response 0.04;
+use Uniform::HTTP::FastPath 0.05 ();
+use Uniform::HTTP::Request 0.05;
+use Uniform::HTTP::Response 0.05;
 
 our $VERSION = '0.01';
 
@@ -17,6 +18,71 @@ my %FORBIDDEN = map { $_ => 1 } qw(
     transfer-encoding
     upgrade
 );
+
+my $TOKEN_RE = qr/\A[!\#\$%&'*+\-.\^_`|~0-9A-Za-z]+\z/;
+
+sub fast_view {
+    my ($class, $message) = @_;
+    return unless Uniform::HTTP::FastPath::can_view($message);
+    return Uniform::HTTP::FastPath::view($message);
+}
+
+sub _received_flags {
+    my ($kind, $end_stream) = @_;
+
+    my $flags =
+          Uniform::HTTP::FastPath::FLAG_HEADERS_LOSSLESS()
+        | Uniform::HTTP::FastPath::FLAG_TRAILERS_LOSSLESS();
+
+    $flags |= Uniform::HTTP::FastPath::FLAG_TARGET_EXACT()
+        if $kind == Uniform::HTTP::FastPath::KIND_REQUEST();
+
+    if ($end_stream) {
+        $flags |= Uniform::HTTP::FastPath::FLAG_COMPLETE();
+    }
+    else {
+        $flags |= Uniform::HTTP::FastPath::FLAG_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_BODY_MUTABLE()
+            | Uniform::HTTP::FastPath::FLAG_TRAILERS_MUTABLE();
+    }
+
+    return $flags;
+}
+
+sub _validate_request_value {
+    my ($operation, $name, $value) = @_;
+
+    if ($name eq 'method' || $name eq 'protocol') {
+        croak "$operation: $name must be an HTTP token"
+            unless defined($value) && !ref($value) && $value =~ $TOKEN_RE;
+        return;
+    }
+
+    if ($name eq 'target') {
+        croak "$operation: target must not be empty"
+            unless defined($value) && !ref($value) && length($value);
+        croak "$operation: target contains spaces or control bytes"
+            if $value =~ /[\x00-\x20\x7f]/;
+        return;
+    }
+
+    if ($name eq 'scheme') {
+        croak "$operation: scheme must be a valid URI scheme"
+            unless defined($value) && !ref($value)
+                && $value =~ /\A[A-Za-z][A-Za-z0-9+.-]*\z/;
+        return;
+    }
+
+    if ($name eq 'authority') {
+        croak "$operation: authority must not be empty"
+            unless defined($value) && !ref($value) && length($value);
+        croak "$operation: authority contains a prohibited delimiter or control byte"
+            if $value =~ /[\x00-\x20\x7f\/?#]/;
+        return;
+    }
+
+    croak "$operation: unknown request value '$name'";
+}
 
 sub _pairs {
     my ($operation, $pairs) = @_;
@@ -35,11 +101,15 @@ sub _pairs {
     return $pairs;
 }
 
-sub _normal_field {
+sub _check_normal_field {
     my ($operation, $name, $value) = @_;
 
     croak "$operation: HTTP/2 field names must be lowercase"
         unless $name eq lc $name;
+    croak "$operation: field name must be an HTTP token"
+        unless $name =~ $TOKEN_RE;
+    croak "$operation: field value contains a prohibited control byte"
+        if $value =~ /[\x00-\x08\x0a-\x1f\x7f]/;
 
     croak "$operation: HTTP/2 forbids connection-specific field '$name'"
         if $FORBIDDEN{$name};
@@ -47,6 +117,12 @@ sub _normal_field {
     croak "$operation: HTTP/2 TE is limited to trailers"
         if $name eq 'te' && lc($value) ne 'trailers';
 
+    return;
+}
+
+sub _normal_field {
+    my ($operation, $name, $value) = @_;
+    _check_normal_field($operation, $name, $value);
     return [ $name, $value ];
 }
 
@@ -73,7 +149,8 @@ sub _split_header_block {
         }
 
         $saw_normal = 1;
-        push @normal, _normal_field($operation, $name, $value);
+        _check_normal_field($operation, $name, $value);
+        push @normal, $pair;
     }
 
     return (\%pseudo, \@normal);
@@ -150,24 +227,35 @@ sub request_from_headers {
         $target = $pseudo->{':path'};
     }
 
-    my $request = Uniform::HTTP::Request->new(
-        method    => $method,
-        target    => $target,
-        version   => '2',
-        defined($scheme) ? (scheme => $scheme) : (),
-        authority => $authority,
-        defined($protocol) ? (protocol => $protocol) : (),
-        headers   => $normal,
-    );
+    _validate_request_value('request_from_headers()', 'method', $method);
+    _validate_request_value('request_from_headers()', 'target', $target);
+    _validate_request_value('request_from_headers()', 'authority', $authority);
+    _validate_request_value('request_from_headers()', 'scheme', $scheme)
+        if defined $scheme;
+    _validate_request_value('request_from_headers()', 'protocol', $protocol)
+        if defined $protocol;
 
-    if ($end_stream) {
-        $request->mark_complete->freeze;
-    }
-    else {
-        $request->mark_incomplete->freeze_initial;
-    }
+    my $view = [
+        Uniform::HTTP::FastPath::ABI_VERSION(),
+        Uniform::HTTP::FastPath::KIND_REQUEST(),
+        _received_flags(
+            Uniform::HTTP::FastPath::KIND_REQUEST(),
+            $end_stream,
+        ),
+        '2',
+        $method,
+        $target,
+        $scheme,
+        $authority,
+        $protocol,
+        undef,
+        undef,
+        $normal,
+        [],
+        undef,
+    ];
 
-    return $request;
+    return Uniform::HTTP::FastPath::request_from_validated($view);
 }
 
 sub response_from_headers {
@@ -188,20 +276,32 @@ sub response_from_headers {
     croak 'response_from_headers(): missing :status'
         unless defined($status) && length($status);
 
-    my $response = Uniform::HTTP::Response->new(
-        status  => $status,
-        version => '2',
-        headers => $normal,
-    );
+    croak 'response_from_headers(): status must be an integer from 100 through 599'
+        unless $status =~ /\A[0-9]+\z/
+            && $status >= 100
+            && $status <= 599;
 
-    if ($end_stream) {
-        $response->mark_complete->freeze;
-    }
-    else {
-        $response->mark_incomplete->freeze_initial;
-    }
+    my $view = [
+        Uniform::HTTP::FastPath::ABI_VERSION(),
+        Uniform::HTTP::FastPath::KIND_RESPONSE(),
+        _received_flags(
+            Uniform::HTTP::FastPath::KIND_RESPONSE(),
+            $end_stream,
+        ),
+        '2',
+        undef,
+        undef,
+        undef,
+        undef,
+        undef,
+        0 + $status,
+        undef,
+        $normal,
+        [],
+        undef,
+    ];
 
-    return $response;
+    return Uniform::HTTP::FastPath::response_from_validated($view);
 }
 
 sub apply_trailers {
