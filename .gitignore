@@ -10,3 +10,6 @@
 /nghttp2.obj
 /HTTP2.bs
 /Unblock-HTTP2-*
+/.interop-root/
+/.interop-ready
+/.interop-*.log

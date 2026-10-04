@@ -3,6 +3,7 @@
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP2.svg)](https://metacpan.org/dist/Unblock-HTTP2)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP2.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP2)
 [![CI](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/test.yml)
+[![Interop](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/interop.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/interop.yml)
 [![License](https://img.shields.io/cpan/l/Unblock-HTTP2.svg)](https://github.com/haxmeister/perl-Unblock-HTTP2/blob/main/LICENSE)
 [![Perl](https://img.shields.io/badge/perl-5.16%2B-blue.svg)](https://www.perl.org/)
 [![HTTP/2](https://img.shields.io/badge/HTTP%2F2-RFC%209113-blue.svg)](https://www.rfc-editor.org/rfc/rfc9113)
@@ -501,7 +502,12 @@ receive flow control, PING, RFC 9218 priority updates, reset codes, and Extended
 CONNECT.
 
 The CI release gate also runs the suite from the generated distribution tree.
-No socket, TLS implementation, or event loop is required by the protocol tests.
+A separate interoperability workflow exercises an Unblock client against the
+stock nghttpd server and the Unblock server against the stock nghttp client.
+
+No socket, TLS implementation, or event loop is required by the packaged
+protocol engine; the TCP adapters used for interoperability live only under
+xt/ and are excluded from the CPAN distribution.
 
 ## License
 

@@ -1,5 +1,6 @@
 ^\.git(?:/|$)
 ^\.github(?:/|$)
+^xt(?:/|$)
 ^\.gitignore$
 ^_uniform_http(?:/|$)
 ^blib(?:/|$)

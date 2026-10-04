@@ -1,0 +1,81 @@
+name: interop
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  nghttp2:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: latest
+
+      - name: Install nghttp2 tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev nghttp2-client nghttp2-server pkg-config
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cpanm --notest Alien::nghttp2
+          cpanm --notest Uniform::HTTP@0.04
+          cpanm --notest --installdeps .
+
+      - name: Build
+        shell: bash
+        run: |
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Client against nghttpd
+        shell: bash
+        run: |
+          mkdir -p .interop-root
+          printf 'nghttpd-one\n' > .interop-root/one.txt
+          printf 'nghttpd-two\n' > .interop-root/two.txt
+
+          nghttpd --no-tls -a 127.0.0.1 -d "$PWD/.interop-root" 18080 > .interop-nghttpd.log 2>&1 &
+          NGHTTPD_PID=$!
+          trap 'kill "$NGHTTPD_PID" 2>/dev/null || true' EXIT
+
+          env UNBLOCK_HTTP2_INTEROP=1 UNBLOCK_HTTP2_NGHTTPD_HOST=127.0.0.1 UNBLOCK_HTTP2_NGHTTPD_PORT=18080 \
+            prove -b xt/interop-nghttpd.t
+
+          kill "$NGHTTPD_PID"
+          wait "$NGHTTPD_PID" || true
+          trap - EXIT
+
+      - name: Server against nghttp
+        shell: bash
+        run: |
+          rm -f .interop-ready
+
+          env UNBLOCK_HTTP2_SERVER_HOST=127.0.0.1 UNBLOCK_HTTP2_SERVER_PORT=18081 UNBLOCK_HTTP2_READY_FILE="$PWD/.interop-ready" \
+            perl -Mblib xt/interop-server.pl > .interop-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 50); do
+            test -f .interop-ready && break
+            sleep 0.1
+          done
+
+          test -f .interop-ready
+
+          nghttp -v -t 5 http://127.0.0.1:18081/ > .interop-nghttp.log 2>&1
+
+          wait "$SERVER_PID"
+          trap - EXIT
+
+          grep -F 'unblock-server-ok' .interop-nghttp.log
+          grep -F ':status: 200' .interop-nghttp.log
+          grep -F 'x-unblock-interop: nghttp' .interop-nghttp.log
