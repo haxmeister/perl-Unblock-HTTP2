@@ -98,6 +98,17 @@ sub respond {
     return $self;
 }
 
+sub update_priority {
+    my ($self, $field_value) = @_;
+    croak 'update_priority(): Stream is already terminal' if $self->is_terminal;
+
+    my $connection = $self->{connection}
+        or croak 'update_priority(): HTTP/2 connection is no longer available';
+
+    $connection->_update_stream_priority($self, $field_value);
+    return $self;
+}
+
 sub cancel {
     my ($self) = @_;
     return $self if $self->is_terminal;
@@ -268,6 +279,10 @@ producing more.
 
 Server streams use C<inform()> for non-final informational responses and
 C<respond()> for the final Uniform response.
+
+Client streams can use C<update_priority($field_value)> to send an RFC 9218
+PRIORITY_UPDATE after the peer has enabled extensible priorities. The field
+value uses the standard Priority field syntax, for example C<u=0, i>.
 
 Incoming body bytes are automatically credited back to the peer after the body
 callback returns. For application-driven receive backpressure, disable that on
