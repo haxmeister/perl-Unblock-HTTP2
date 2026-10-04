@@ -171,6 +171,27 @@ The private binding remains responsible for SETTINGS frame processing and
 effective state. It only exposes the received identifier/value pairs needed to
 describe peer changes without exposing nghttp2 objects to callers.
 
+## Extensible prioritization
+
+RFC 9113 deprecates the original HTTP/2 dependency-tree priority scheme.
+Unblock therefore uses RFC 9218 extensible priorities.
+
+Both endpoints advertise SETTINGS_NO_RFC7540_PRIORITIES = 1 in their initial
+SETTINGS frame by default. The setting is represented by the portable public
+name no_rfc7540_priorities and cannot change value after the first SETTINGS
+frame.
+
+Initial priority can travel in the normal HTTP Priority header through
+Uniform::HTTP. A client Stream can later send a PRIORITY_UPDATE using
+update_priority($field_value). The update carries the complete Priority field
+value as opaque protocol bytes so future priority parameters do not require a
+new Unblock API.
+
+The server enables nghttp2's built-in PRIORITY_UPDATE receiver. nghttp2 parses
+and applies the signal to its scheduling state; Unblock additionally exposes
+the prioritized stream id and original field value through on_priority for
+hosts that want their own scheduling or observability policy.
+
 ## PING control frames
 
 PING is exposed as a connection-level protocol primitive. ping($opaque)
