@@ -27,6 +27,23 @@ my $BODY_LOW_WATER  = 32_768;
 sub new {
     my ($class, %option) = @_;
 
+    my %callbacks;
+    for my $name (qw(
+        on_settings on_settings_ack on_ping on_ping_ack on_invalid_frame
+    )) {
+        next unless exists $option{$name};
+        my $callback = delete $option{$name};
+        croak "new(): $name must be a coderef"
+            if defined($callback) && ref($callback) ne 'CODE';
+        $callbacks{$name} = $callback if $callback;
+    }
+
+    my $settings = exists($option{settings})
+        ? delete($option{settings})
+        : {};
+    croak 'new(): settings must be a hash reference'
+        unless ref($settings) eq 'HASH';
+
     my $max_active_streams = exists($option{max_active_streams})
         ? delete($option{max_active_streams})
         : 100;
@@ -83,16 +100,27 @@ sub new {
                 my $self = $weak or return 0;
                 return $self->_on_stream_close(@_);
             },
+            on_invalid_frame => sub {
+                my $self = $weak or return 0;
+                return $self->_on_invalid_frame(@_);
+            },
         },
     );
 
-    $self->_initialize_connection($session);
+    $self->_initialize_connection(
+        $session,
+        role      => 'client',
+        callbacks => \%callbacks,
+    );
 
-    $session->send_connection_preface(
+    my %initial_settings = (
         max_concurrent_streams => 100,
         max_header_list_size   => $self->{max_header_list_size},
         enable_push            => 0,
+        no_rfc7540_priorities  => 1,
+        %$settings,
     );
+    $self->_submit_settings('new()', \%initial_settings);
 
     return $self;
 }
@@ -110,13 +138,7 @@ sub peer_goaway {
 sub drain {
     my ($self) = @_;
     return $self if $self->is_closed || $self->{draining};
-
-    $self->{session}->submit_goaway(
-        last_stream_id => 0,
-        error_code     => 0,
-    );
-    $self->{draining} = 1;
-    return $self;
+    return $self->goaway(error_code => 0);
 }
 
 sub can_open_stream {
@@ -124,9 +146,7 @@ sub can_open_stream {
     return 0 if $self->is_closed || $self->{draining};
 
     my $limit = $self->{max_active_streams};
-    my $peer_limit = $self->{session}->remote_setting(
-        Unblock::HTTP2::_nghttp2::SETTINGS_MAX_CONCURRENT_STREAMS(),
-    );
+    my $peer_limit = $self->peer_setting('max_concurrent_streams');
     $limit = $peer_limit if $peer_limit < $limit;
 
     return $self->stream_count < $limit ? 1 : 0;
@@ -142,9 +162,7 @@ sub request {
         unless Unblock::HTTP2::_Headers::_request_contract($request);
 
     if (defined($request->protocol) && length($request->protocol)) {
-        my $enabled = $self->{session}->remote_setting(
-            Unblock::HTTP2::_nghttp2::SETTINGS_ENABLE_CONNECT_PROTOCOL(),
-        );
+        my $enabled = $self->peer_setting('enable_connect_protocol');
         croak 'request(): peer has not enabled Extended CONNECT'
             unless $enabled == 1;
     }
@@ -342,8 +360,23 @@ sub _status_from_block {
     return;
 }
 
+sub _on_invalid_frame {
+    my ($self, $frame, $lib_error_code) = @_;
+
+    my $copy = ref($frame) eq 'HASH' ? { %$frame } : {};
+    $self->_invoke_control_callback(
+        'on_invalid_frame',
+        $copy,
+        0 + ($lib_error_code || 0),
+    );
+    return 0;
+}
+
 sub _on_frame_recv {
     my ($self, $frame) = @_;
+
+    return 0 if $self->_handle_settings_frame($frame);
+    return 0 if $self->_handle_ping_frame($frame);
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
@@ -509,8 +542,8 @@ sub _on_stream_close {
 
     if ($error_code) {
         my $error = "HTTP/2 stream closed with error $error_code";
-        $stream->_fail($error);
-        $self->_invoke_stream_error($stream, $error);
+        $stream->_fail($error, $error_code, 1);
+        $self->_invoke_stream_error($stream, $error, $error_code);
     }
     elsif ($state && $state->{response}) {
         $state->{response}->mark_complete->freeze;
@@ -538,9 +571,9 @@ sub _stream_failure {
     my $stream = $self->stream_for_id($stream_id) or return;
     return if $stream->is_terminal;
 
-    $stream->_fail($error);
+    $stream->_fail($error, $code, 0);
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
-    $self->_invoke_stream_error($stream, $error);
+    $self->_invoke_stream_error($stream, $error, $code);
     return;
 }
 
@@ -583,9 +616,7 @@ sub _respond_stream {
 sub _cancel_stream {
     my ($self, $stream) = @_;
     return if $stream->is_terminal;
-
-    eval { $self->{session}->submit_rst_stream($stream->id, H2_CANCEL) };
-    $stream->_mark_cancelled;
+    $self->_reset_stream($stream, H2_CANCEL);
     return;
 }
 

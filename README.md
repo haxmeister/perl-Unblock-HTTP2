@@ -194,6 +194,30 @@ For a streaming response:
     $stream->write($chunk);
     $stream->end;
 
+## Stream resets and error codes
+
+C<cancel()> remains the simple way to cancel a stream. It sends the standard
+C<CANCEL> RST_STREAM code.
+
+For explicit protocol reasons, use:
+
+    $stream->reset(Unblock::HTTP2::REFUSED_STREAM());
+
+Known HTTP/2 error codes are public package constants on Unblock::HTTP2,
+including C<NO_ERROR>, C<PROTOCOL_ERROR>, C<FLOW_CONTROL_ERROR>,
+C<REFUSED_STREAM>, and C<CANCEL>.
+
+When a stream is reset, the Stream preserves:
+
+    $stream->error_code
+    $stream->error_name
+    $stream->reset_by_peer
+
+C<reset_by_peer> distinguishes a received RST_STREAM from one initiated by the
+local application. Error callbacks also receive the numeric HTTP/2 error code
+as an additional argument when one exists. This lets higher layers implement
+retry policy without Unblock deciding which requests should be retried.
+
 ## Receive-side flow control
 
 Incoming body bytes are automatically credited back to the peer after the body
@@ -221,15 +245,183 @@ Unblock keeps connection-level receive credit moving independently, so one slow
 stream can exhaust its own receive window without unnecessarily stalling other
 streams on the same HTTP/2 connection. No timer or transport policy is involved.
 
+## SETTINGS
+
+Both Client and Server expose HTTP/2 SETTINGS without exposing the private
+nghttp2 session.
+
+Initial settings can be supplied at construction:
+
+    my $server = Unblock::HTTP2::Server->new(
+        settings => {
+            initial_window_size => 262_144,
+            max_frame_size      => 32_768,
+        },
+
+        on_settings => sub {
+            my ($engine, $peer, $changed) = @_;
+            # $peer is the current effective peer SETTINGS snapshot.
+            # $changed contains values from this SETTINGS frame.
+        },
+
+        on_settings_ack => sub {
+            my ($engine, $acked) = @_;
+            # $acked contains the values from our acknowledged SETTINGS frame.
+        },
+    );
+
+The public setting names are:
+
+    header_table_size
+    enable_push
+    max_concurrent_streams
+    initial_window_size
+    max_frame_size
+    max_header_list_size
+    enable_connect_protocol
+    no_rfc7540_priorities
+
+Read the values currently advertised by this endpoint with local_settings() or
+local_setting($name). Read the peer's effective values with peer_settings() or
+peer_setting($name). Returned hashes are copies.
+
+A connection can send later SETTINGS at any time:
+
+    $engine->update_settings(
+        initial_window_size => 131_072,
+    );
+
+settings_pending() reports how many locally submitted SETTINGS frames are still
+waiting for ACK. Unblock validates the HTTP/2 value ranges and keeps the
+SETTINGS_ENABLE_CONNECT_PROTOCOL transition one-way: once 1 has been sent it
+cannot later be reset to 0.
+
+SETTINGS_ENABLE_PUSH is a client-to-server setting. The client keeps it at 0
+because server push is not part of the public Unblock API, and the server API
+rejects any attempt to send ENABLE_PUSH, including value 0.
+
+## Modern prioritization
+
+Unblock::HTTP2 uses the RFC 9218 extensible priority scheme rather than the
+deprecated RFC 7540 dependency tree.
+
+Client and Server advertise:
+
+    no_rfc7540_priorities => 1
+
+in their first SETTINGS frame by default. A caller can override that initial
+value with the normal settings constructor option.
+
+The HTTP Priority header remains an ordinary Uniform::HTTP header and can be
+placed on a Request without an HTTP/2-specific object:
+
+    headers => [
+        [ 'Priority', 'u=1, i' ],
+    ]
+
+After a request has been sent, a client can change its preference with the
+HTTP/2-specific PRIORITY_UPDATE frame:
+
+    $stream->update_priority('u=0, i');
+
+The server can observe hop-by-hop updates with:
+
+    on_priority => sub {
+        my ($server, $stream_id, $field_value) = @_;
+    }
+
+Unblock preserves the complete Priority field value instead of limiting the API
+to today's urgency and incremental parameters. nghttp2 owns parsing and
+scheduling. If the peer did not advertise RFC 9218 priority support,
+update_priority() is refused.
+
+## PING
+
+Both endpoints can send an HTTP/2 PING with exactly eight opaque bytes:
+
+    $engine->ping("12345678");
+
+Incoming PING and PING ACK frames can be observed independently:
+
+    my $client = Unblock::HTTP2::Client->new(
+        on_ping => sub {
+            my ($engine, $opaque) = @_;
+        },
+
+        on_ping_ack => sub {
+            my ($engine, $opaque) = @_;
+        },
+    );
+
+libnghttp2 automatically generates the required ACK for a received PING, and
+Unblock preserves the eight opaque bytes exactly. PING is connection-level; it
+is not associated with a Stream.
+
+Unblock does not implement keepalive intervals, deadlines, liveness policy, or
+round-trip timers. Those decisions belong to the caller or higher connection
+policy.
+
+## Fatal engine failures
+
+If libnghttp2 reports a fatal receive or send failure, C<input()> or C<output()>
+still throws so the transport integration cannot miss the failure. The engine
+also closes itself before rethrowing and records the reason:
+
+    $engine->is_closed
+    $engine->close_reason
+
+This prevents a caught backend exception from leaving an HTTP/2 session that
+appears reusable. Explicit C<close($reason)> uses the same retained
+C<close_reason> state.
+
+## Invalid frames and extension safety
+
+nghttp2 performs HTTP/2 frame and state validation. When it receives an invalid
+non-DATA frame, it automatically queues the protocol-required RST_STREAM or
+GOAWAY response.
+
+Both Client and Server can observe that event without taking over protocol
+handling:
+
+    on_invalid_frame => sub {
+        my ($engine, $frame, $lib_error_code) = @_;
+    }
+
+The frame value is a plain hash containing protocol facts such as type, flags,
+stream_id, and length. The library error code is the numeric nghttp2 validation
+code; it is deliberately not translated into an HTTP/2 wire error code.
+
+Unknown extension frame types remain valid HTTP/2 extensibility points and are
+ignored rather than reported as invalid.
+
+nghttp2's separate error logging callback is not public protocol state and is
+not routed through application on_error callbacks.
+
 ## Graceful draining
 
 Both client and server engines can begin a graceful HTTP/2 shutdown with:
 
     $engine->drain;
 
-This queues GOAWAY and marks the connection as draining. A client will not open
-new request streams after local drain or after receiving peer GOAWAY. Streams
-that were already accepted can continue to completion.
+This queues a NO_ERROR GOAWAY and marks the connection as draining. A client
+will not open new request streams after local drain or after receiving peer
+GOAWAY. Streams that were already accepted can continue to completion.
+
+For an explicit protocol shutdown reason, use:
+
+    $engine->goaway(
+        error_code => Unblock::HTTP2::ENHANCE_YOUR_CALM(),
+        debug_data => $bytes,
+    );
+
+Server GOAWAY defaults to the highest peer request stream already observed.
+Client GOAWAY defaults to stream zero because server push is disabled.
+C<last_stream_id> can be supplied explicitly when an application needs a
+narrower boundary. A later GOAWAY may keep or lower that boundary but cannot
+increase it.
+
+C<local_goaway()> returns a copy of the most recently submitted boundary,
+error code, and debug bytes.
 
 After receiving GOAWAY, peer_goaway() returns the peer's last stream ID, HTTP/2
 error code, and debug data. Unblock exposes those facts but does not decide

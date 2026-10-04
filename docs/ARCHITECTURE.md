@@ -55,7 +55,10 @@ Received HTTP/2 pseudo-headers map as follows:
     :protocol   -> protocol
     :status     -> status
 
-Pseudo-headers are not inserted into the ordinary field list.
+Pseudo-headers are not inserted into the ordinary field list. Both receive
+and send paths enforce the request-shape rules used by the mapping: ordinary
+requests require a nonempty path target, ordinary CONNECT omits scheme/path,
+and Extended CONNECT requires a nonempty protocol, scheme, authority, and path.
 
 Ordinary fields map to Uniform headers. A later HTTP/2 HEADERS block maps to
 the separate Uniform trailer section.
@@ -149,11 +152,120 @@ when end() is called.
 Incoming trailing HEADERS are validated as ordinary HTTP/2 fields, added to the
 Uniform trailer section, then frozen before message completion is reported.
 
+## Stream reset facts
+
+RST_STREAM is a transport-protocol fact, while retry policy belongs above the
+engine. Unblock therefore preserves the numeric HTTP/2 error code on Stream
+objects and records whether the reset was received from the peer or initiated
+locally.
+
+cancel() is the convenience form for the CANCEL code. reset($error_code)
+allows a caller to submit another explicit 32-bit HTTP/2 error code, such as
+REFUSED_STREAM. Incoming reset codes are passed through to stream and server
+error callbacks as an additional argument.
+
+Unblock::HTTP2 publishes the standard RFC error-code constants and can map
+known numeric values back to symbolic names. It does not automatically retry a
+REFUSED_STREAM or reinterpret one reset reason as another.
+
+## SETTINGS control plane
+
+SETTINGS is part of the public protocol engine rather than a private backend
+escape hatch. Client and Server accept an initial settings hash, expose the
+locally advertised values and libnghttp2's effective peer values, and can
+submit later SETTINGS changes.
+
+Peer SETTINGS frames are surfaced as protocol facts through on_settings. The
+callback receives both the current effective peer snapshot and the values that
+changed in that frame. SETTINGS acknowledgements are matched in submission
+order and surfaced through on_settings_ack. settings_pending() reports the
+number of locally submitted SETTINGS frames still awaiting ACK.
+
+The public layer validates RFC value ranges before asking libnghttp2 to submit
+a frame. It also enforces endpoint-role and extension semantics that are part
+of the HTTP/2 protocol surface: SETTINGS_ENABLE_PUSH can only be sent by a
+client, and SETTINGS_ENABLE_CONNECT_PROTOCOL cannot be changed from 1 back to
+0 after being advertised.
+
+The private binding remains responsible for SETTINGS frame processing and
+effective state. It only exposes the received identifier/value pairs needed to
+describe peer changes without exposing nghttp2 objects to callers.
+
+## Extensible prioritization
+
+RFC 9113 deprecates the original HTTP/2 dependency-tree priority scheme.
+Unblock therefore uses RFC 9218 extensible priorities.
+
+Both endpoints advertise SETTINGS_NO_RFC7540_PRIORITIES = 1 in their initial
+SETTINGS frame by default. The setting is represented by the portable public
+name no_rfc7540_priorities and cannot change value after the first SETTINGS
+frame.
+
+Initial priority can travel in the normal HTTP Priority header through
+Uniform::HTTP. A client Stream can later send a PRIORITY_UPDATE using
+update_priority($field_value). The update carries the complete Priority field
+value as opaque protocol bytes so future priority parameters do not require a
+new Unblock API.
+
+The server enables nghttp2's built-in PRIORITY_UPDATE receiver. nghttp2 parses
+and applies the signal to its scheduling state; Unblock additionally exposes
+the prioritized stream id and original field value through on_priority for
+hosts that want their own scheduling or observability policy.
+
+## PING control frames
+
+PING is exposed as a connection-level protocol primitive. ping($opaque)
+requires exactly eight bytes and submits one non-ACK PING. Received PING and
+PING ACK frames preserve those bytes and are surfaced separately through
+on_ping and on_ping_ack.
+
+libnghttp2 retains responsibility for protocol validation and for automatically
+submitting the mandatory ACK to a non-ACK PING. Unblock does not add timer,
+keepalive, health-check, or timeout policy. A host can measure round-trip time
+or decide when a missing ACK matters without changing the protocol engine.
+
+## Fatal session failures
+
+input() and output() are the boundary around nghttp2 memory I/O. A negative or
+otherwise fatal nghttp2 receive/send result is surfaced as a Perl exception,
+but the engine first transitions to closed state and fails any still-active
+streams. close_reason() retains the failure text.
+
+This is intentionally different from an invalid HTTP/2 frame that nghttp2 can
+handle at the protocol layer by queuing RST_STREAM or GOAWAY. Recoverable
+protocol handling keeps the session alive as allowed by nghttp2; fatal backend
+failure makes the Unblock engine unusable.
+
+## Frame validation and extension behavior
+
+libnghttp2 remains authoritative for HTTP/2 frame and connection-state
+validation. Its on-invalid-frame callback is exposed symmetrically by Client
+and Server as on_invalid_frame. Unblock passes a copied frame-description hash
+and the numeric nghttp2 validation error to the host for observability.
+
+The callback does not replace protocol handling. nghttp2 automatically submits
+the appropriate RST_STREAM or GOAWAY for an invalid non-DATA frame.
+
+Unknown frame types are not protocol errors. HTTP/2 requires endpoints to
+ignore unsupported extension frame types, so Unblock leaves that behavior
+untouched and does not surface them through on_invalid_frame.
+
+nghttp2's error_callback2 is solely a library debugging/logging facility.
+Unblock does not reinterpret it as an HTTP/2 application error. In particular,
+server on_error remains a stream/application error callback rather than a
+channel for nghttp2 diagnostic strings.
+
 ## Graceful draining
 
 Client and Server expose drain() as the graceful connection-shutdown operation.
-It submits GOAWAY and prevents new locally initiated client streams while
-letting streams already accepted by the peer finish normally.
+It submits a NO_ERROR GOAWAY and prevents new locally initiated client streams
+while letting streams already accepted by the peer finish normally.
+
+goaway() is the lower-level control operation. It accepts an explicit 32-bit
+HTTP/2 error code, opaque debug bytes, and optionally a 31-bit last-stream
+boundary. The engine retains the latest locally submitted GOAWAY facts through
+local_goaway(). Successive GOAWAY frames may only keep or lower the
+last-stream-id boundary, matching the protocol's monotonic shutdown rule.
 
 The server remembers the highest peer-initiated request stream it has seen and
 uses that value when initiating GOAWAY. The client advertises ENABLE_PUSH = 0,

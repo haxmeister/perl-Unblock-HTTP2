@@ -211,4 +211,33 @@ ok !$ok, ':protocol on a non-CONNECT request is rejected';
 like $@, qr/:protocol requires CONNECT/,
     'non-CONNECT protocol rejection is explicit';
 
+$ok = eval {
+    my $bad = Uniform::HTTP::Request->new(
+        method    => 'GET',
+        target    => '',
+        scheme    => 'https',
+        authority => 'example.test',
+    );
+    Unblock::HTTP2::_Headers->request_headers($bad);
+    1;
+};
+ok !$ok, 'outgoing non-CONNECT request cannot emit an empty :path';
+like $@, qr/nonempty path target|target/i,
+    'empty outbound path rejection is explicit';
+
+$ok = eval {
+    my $bad = Uniform::HTTP::Request->new(
+        method    => 'CONNECT',
+        protocol  => '',
+        scheme    => 'https',
+        authority => 'example.test',
+        target    => '/chat',
+    );
+    Unblock::HTTP2::_Headers->request_headers($bad);
+    1;
+};
+ok !$ok, 'outgoing Extended CONNECT requires a nonempty :protocol';
+like $@, qr/nonempty protocol|protocol/i,
+    'empty outbound protocol rejection is explicit';
+
 done_testing;

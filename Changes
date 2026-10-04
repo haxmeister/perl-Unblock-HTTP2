@@ -24,6 +24,33 @@ Revision history for Unblock-HTTP2
     - Preserve received GOAWAY last-stream-id, error code, and debug data.
     - Add application-driven receive flow control with per-stream consume()
       credit while keeping connection-level credit independent.
+    - Add a public SETTINGS control plane with initial configuration, effective
+      peer/local views, later updates, peer-change notifications, ACK tracking,
+      RFC value validation, and no private nghttp2 session access.
+    - Add connection-level PING with exact eight-byte opaque payloads, distinct
+      PING/PING-ACK callbacks, automatic protocol ACKs, and no keepalive policy.
+    - Add RFC 9218 extensible prioritization with
+      SETTINGS_NO_RFC7540_PRIORITIES, ordinary Priority headers,
+      client Stream->update_priority(), and server on_priority observation.
+    - Add symmetric on_invalid_frame observation for protocol-invalid
+      frames while retaining nghttp2's automatic RST_STREAM/GOAWAY handling.
+    - Verify unknown extension frame types are ignored as required by HTTP/2.
+    - Stop routing nghttp2's debug-only error callback through public server
+      on_error.
+    - Add explicit goaway() control with HTTP/2 error codes, binary debug data,
+      local GOAWAY introspection, and non-increasing last-stream boundaries.
+    - Route drain() through the same GOAWAY control path.
+    - Close the engine deterministically when nghttp2 memory I/O reports a
+      fatal failure, retain close_reason(), and still rethrow to the caller.
+    - Enforce SETTINGS_ENABLE_PUSH as client-to-server only; servers now reject
+      the setting even when the attempted value is zero.
+    - Correct the documented public SETTINGS list to include
+      no_rfc7540_priorities.
+    - Tighten outbound pseudo-header validation so ordinary requests cannot
+      emit an empty :path and Extended CONNECT cannot emit an empty :protocol.
+    - Preserve RST_STREAM error codes with public RFC constants,
+      Stream->reset(), error_code/error_name/reset_by_peer accessors, and
+      reset codes passed through error callbacks for higher-layer retry policy.
     - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.

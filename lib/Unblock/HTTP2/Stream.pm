@@ -35,6 +35,8 @@ sub _new {
         callbacks        => { %$callbacks },
         state            => 'active',
         error            => undef,
+        error_code       => undef,
+        reset_by_peer    => undef,
         auto_consume     => 1,
         unconsumed_bytes => 0,
     }, $class;
@@ -48,6 +50,14 @@ sub request      { return $_[0]{request} }
 sub response     { return $_[0]{response} }
 sub state        { return $_[0]{state} }
 sub error        { return $_[0]{error} }
+sub error_code   { return $_[0]{error_code} }
+sub reset_by_peer { return $_[0]{reset_by_peer} }
+sub error_name {
+    my ($self) = @_;
+    return unless defined $self->{error_code};
+    require Unblock::HTTP2;
+    return Unblock::HTTP2->error_name($self->{error_code});
+}
 sub unconsumed_bytes { return $_[0]{unconsumed_bytes} }
 sub is_complete  { return $_[0]{state} eq 'complete' ? 1 : 0 }
 sub is_cancelled { return $_[0]{state} eq 'cancelled' ? 1 : 0 }
@@ -98,19 +108,36 @@ sub respond {
     return $self;
 }
 
+sub update_priority {
+    my ($self, $field_value) = @_;
+    croak 'update_priority(): Stream is already terminal' if $self->is_terminal;
+
+    my $connection = $self->{connection}
+        or croak 'update_priority(): HTTP/2 connection is no longer available';
+
+    $connection->_update_stream_priority($self, $field_value);
+    return $self;
+}
+
+sub reset {
+    my ($self, $error_code) = @_;
+    croak 'reset(): Stream is already terminal' if $self->is_terminal;
+    croak 'reset(): error code must be an unsigned 32-bit integer'
+        unless defined($error_code) && !ref($error_code)
+            && "$error_code" =~ /\A[0-9]+\z/
+            && $error_code <= 4_294_967_295;
+
+    my $connection = $self->{connection}
+        or croak 'reset(): HTTP/2 connection is no longer available';
+
+    $connection->_reset_stream($self, 0 + $error_code);
+    return $self;
+}
+
 sub cancel {
     my ($self) = @_;
     return $self if $self->is_terminal;
-
-    my $connection = $self->{connection};
-    if ($connection) {
-        $connection->_cancel_stream($self);
-    }
-    else {
-        $self->_mark_cancelled;
-    }
-
-    return $self;
+    return $self->reset(8);
 }
 
 sub auto_consume {
@@ -210,14 +237,18 @@ sub _mark_complete {
 }
 
 sub _mark_cancelled {
-    my ($self) = @_;
+    my ($self, $error_code, $by_peer) = @_;
     return $self if $self->is_terminal;
     $self->{state} = 'cancelled';
+    if (defined $error_code) {
+        $self->{error_code} = 0 + $error_code;
+        $self->{reset_by_peer} = $by_peer ? 1 : 0;
+    }
     return $self;
 }
 
 sub _fail {
-    my ($self, $error) = @_;
+    my ($self, $error, $error_code, $by_peer) = @_;
     return $self if $self->is_terminal;
 
     $error = 'HTTP/2 stream failed'
@@ -225,6 +256,10 @@ sub _fail {
 
     $self->{state} = 'error';
     $self->{error} = "$error";
+    if (defined $error_code) {
+        $self->{error_code} = 0 + $error_code;
+        $self->{reset_by_peer} = $by_peer ? 1 : 0;
+    }
     return $self;
 }
 
@@ -268,6 +303,15 @@ producing more.
 
 Server streams use C<inform()> for non-final informational responses and
 C<respond()> for the final Uniform response.
+
+C<reset($error_code)> sends RST_STREAM with an explicit HTTP/2 error code.
+C<cancel()> is the C<CANCEL> convenience form. C<error_code()>,
+C<error_name()>, and C<reset_by_peer()> preserve reset facts for higher-layer
+retry and policy decisions.
+
+Client streams can use C<update_priority($field_value)> to send an RFC 9218
+PRIORITY_UPDATE after the peer has enabled extensible priorities. The field
+value uses the standard Priority field syntax, for example C<u=0, i>.
 
 Incoming body bytes are automatically credited back to the peer after the body
 callback returns. For application-driven receive backpressure, disable that on

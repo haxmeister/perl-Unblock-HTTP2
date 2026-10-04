@@ -28,13 +28,23 @@ sub new {
     my ($class, %option) = @_;
 
     my %callbacks;
-    for my $name (qw(on_request on_body on_request_end on_error)) {
+    for my $name (qw(
+        on_request on_body on_request_end on_error
+        on_settings on_settings_ack on_ping on_ping_ack on_priority
+        on_invalid_frame
+    )) {
         next unless exists $option{$name};
         my $callback = delete $option{$name};
         croak "new(): $name must be a coderef"
             if defined($callback) && ref($callback) ne 'CODE';
         $callbacks{$name} = $callback if $callback;
     }
+
+    my $settings = exists($option{settings})
+        ? delete($option{settings})
+        : {};
+    croak 'new(): settings must be a hash reference'
+        unless ref($settings) eq 'HASH';
 
     my $max_concurrent_streams = exists($option{max_concurrent_streams})
         ? delete($option{max_concurrent_streams})
@@ -106,20 +116,27 @@ sub new {
                 my $self = $weak or return 0;
                 return $self->_on_stream_close(@_);
             },
-            on_error => sub {
+            on_invalid_frame => sub {
                 my $self = $weak or return 0;
-                return $self->_on_session_error(@_);
+                return $self->_on_invalid_frame(@_);
             },
         },
     );
 
-    $self->_initialize_connection($session);
+    $self->_initialize_connection(
+        $session,
+        role      => 'server',
+        callbacks => \%callbacks,
+    );
 
-    $session->send_connection_preface(
+    my %initial_settings = (
         max_concurrent_streams  => $self->{max_concurrent_streams},
         max_header_list_size    => $self->{max_header_list_size},
         enable_connect_protocol => $self->{enable_connect_protocol},
+        no_rfc7540_priorities   => 1,
+        %$settings,
     );
+    $self->_submit_settings('new()', \%initial_settings);
 
     return $self;
 }
@@ -136,13 +153,7 @@ sub peer_goaway {
 sub drain {
     my ($self) = @_;
     return $self if $self->is_closed || $self->{draining};
-
-    $self->{session}->submit_goaway(
-        last_stream_id => $self->{last_peer_stream_id},
-        error_code     => 0,
-    );
-    $self->{draining} = 1;
-    return $self;
+    return $self->goaway(error_code => 0);
 }
 
 sub _on_begin_headers {
@@ -204,6 +215,10 @@ sub _on_header {
 
 sub _on_frame_recv {
     my ($self, $frame) = @_;
+
+    return 0 if $self->_handle_settings_frame($frame);
+    return 0 if $self->_handle_ping_frame($frame);
+    return 0 if $self->_handle_priority_update_frame($frame);
 
     if (($frame->{type} // -1) == H2_GOAWAY) {
         $self->{draining} = 1;
@@ -340,10 +355,15 @@ sub _invoke_callback {
     return $ok ? 1 : $@;
 }
 
-sub _on_session_error {
-    my ($self, $lib_error_code, $message) = @_;
-    my $callback = $self->{callbacks}{on_error} or return 0;
-    eval { $callback->(undef, "$message") };
+sub _on_invalid_frame {
+    my ($self, $frame, $lib_error_code) = @_;
+
+    my $copy = ref($frame) eq 'HASH' ? { %$frame } : {};
+    $self->_invoke_control_callback(
+        'on_invalid_frame',
+        $copy,
+        0 + ($lib_error_code || 0),
+    );
     return 0;
 }
 
@@ -555,9 +575,7 @@ sub _write_stream_body {
 sub _cancel_stream {
     my ($self, $stream) = @_;
     return if $stream->is_terminal;
-
-    eval { $self->{session}->submit_rst_stream($stream->id, H2_CANCEL) };
-    $stream->_mark_cancelled;
+    $self->_reset_stream($stream, H2_CANCEL);
     return;
 }
 
@@ -570,11 +588,11 @@ sub _stream_failure {
     my $stream = $self->stream_for_id($stream_id);
 
     if ($stream && !$stream->is_terminal) {
-        $stream->_fail($error);
-        $self->_invoke_stream_error($stream, $error);
+        $stream->_fail($error, $code, 0);
+        $self->_invoke_stream_error($stream, $error, $code);
     }
     elsif (my $callback = $self->{callbacks}{on_error}) {
-        eval { $callback->(undef, $error) };
+        eval { $callback->(undef, $error, $code) };
     }
 
     eval { $self->{session}->submit_rst_stream($stream_id, $code) };
@@ -582,17 +600,17 @@ sub _stream_failure {
 }
 
 sub _invoke_stream_error {
-    my ($self, $stream, $error) = @_;
+    my ($self, $stream, $error, $error_code) = @_;
 
-    my $result = $stream->_invoke('on_error', $error);
+    my $result = $stream->_invoke('on_error', $error, $error_code);
     if ($result ne '1') {
         my $callback = $self->{callbacks}{on_error};
-        eval { $callback->($stream, "$result") } if $callback;
+        eval { $callback->($stream, "$result", $error_code) } if $callback;
         return;
     }
 
     my $callback = $self->{callbacks}{on_error};
-    eval { $callback->($stream, $error) } if $callback;
+    eval { $callback->($stream, $error, $error_code) } if $callback;
     return;
 }
 
@@ -606,8 +624,8 @@ sub _on_stream_close {
     if (!$stream->is_terminal) {
         if ($error_code) {
             my $error = "HTTP/2 stream closed with error $error_code";
-            $stream->_fail($error);
-            $self->_invoke_stream_error($stream, $error);
+            $stream->_fail($error, $error_code, 1);
+            $self->_invoke_stream_error($stream, $error, $error_code);
         }
         else {
             if (!$stream->request->is_complete) {

@@ -25,11 +25,16 @@ The private binding exposes only the pieces Unblock needs:
 - frame, header, DATA, error, and stream-close callbacks
 - local SETTINGS submission
 - effective remote SETTINGS queries
+- received SETTINGS identifier/value details and ACK flags
+- invalid non-DATA frame callbacks with frame metadata and nghttp2 error codes
+- RFC 9218 PRIORITY_UPDATE submission and built-in receive processing
 - request and response submission
+- GOAWAY submission with explicit last-stream id, error code, and debug bytes
 - generic HEADERS submission
 - deferred DATA providers and resume
 - trailers
-- RST_STREAM
+- RST_STREAM submission and received error-code details
+- PING submission and received opaque-data details
 - GOAWAY submission and received GOAWAY details
 - stream half-close queries
 - disabled automatic receive WINDOW_UPDATE
@@ -45,7 +50,10 @@ Unblock uses this to enforce SETTINGS_ENABLE_CONNECT_PROTOCOL before sending
 Extended CONNECT and to combine the local active-stream cap with the peer's
 SETTINGS_MAX_CONCURRENT_STREAMS.
 
-Unblock does not parse SETTINGS frames independently.
+The binding also exposes the identifier/value pairs carried by received
+SETTINGS frames and the normal frame flags. Unblock maps known identifiers to
+portable public setting names, reports peer changes, and tracks outbound
+SETTINGS acknowledgements without exposing raw nghttp2 objects.
 
 ## Receive flow control
 
@@ -70,6 +78,52 @@ Generic non-final HEADERS submission is available through the private binding.
 The public server API is Stream->inform($response). It accepts a Uniform
 informational Response and leaves the stream available for later informational
 responses and the final Stream->respond($response).
+
+## Stream resets
+
+nghttp2's stream-close callback includes the HTTP/2 error code used to close a
+stream. The Perl layer must preserve that code rather than flattening every
+RST_STREAM into a generic string.
+
+Explicit local reset uses nghttp2_submit_rst_stream with the caller's validated
+32-bit error code. CANCEL remains only a convenience default; the private
+binding does not choose retry semantics.
+
+## Invalid frame handling
+
+The private binding registers nghttp2's on_invalid_frame_recv callback. The
+callback converts the frame header and any already-supported frame details into
+a plain Perl hash and also returns the numeric nghttp2 library error code.
+
+The public engine uses this only for observation. nghttp2 remains responsible
+for automatically submitting the corresponding RST_STREAM or GOAWAY.
+
+The binding also contains nghttp2's optional error logging callback support,
+but that callback is diagnostic output rather than protocol state and is not
+wired to the public Client or Server error API.
+
+## Extensible priorities
+
+Alien::nghttp2 0.003 requires libnghttp2 1.57.0 or newer, which includes the
+RFC 9218 implementation added in nghttp2 1.48.0.
+
+The server session enables NGHTTP2_PRIORITY_UPDATE as a built-in received
+extension type. Received extension payloads expose the prioritized stream id
+and complete Priority field value to the Perl layer while nghttp2 retains its
+normal parsing and scheduling state.
+
+The client submits updates with nghttp2_submit_priority_update. The public
+layer sends them only after the peer's effective
+SETTINGS_NO_RFC7540_PRIORITIES value is 1.
+
+## PING
+
+The private binding exposes nghttp2_submit_ping for non-ACK PING submission and
+includes the eight opaque payload bytes on received PING frame callbacks.
+libnghttp2's automatic PING ACK behavior remains enabled.
+
+The public layer distinguishes PING from PING ACK using the frame ACK flag. It
+does not disable automatic acknowledgement or implement liveness timers.
 
 ## GOAWAY
 
