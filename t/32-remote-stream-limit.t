@@ -37,7 +37,7 @@ my $server = Unblock::HTTP2::Server->new(
 );
 
 my $client = Unblock::HTTP2::Client->new(
-    max_active_streams => 10,
+    max_active_transactions => 10,
 );
 
 pump_until_idle($client, $server);
