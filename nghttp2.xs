@@ -837,6 +837,532 @@ uniform_response_to_nva(pTHX_ unblock_h2_session *ps, SV *message,
 }
 
 static int
+bytes_equal(const char *value, size_t value_len, const char *literal)
+{
+    size_t literal_len = strlen(literal);
+    return value_len == literal_len
+        && memcmp(value, literal, literal_len) == 0;
+}
+
+static int
+span_is_token(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len) {
+        return 0;
+    }
+    for (i = 0; i < len; i++) {
+        if (!http_token_char((unsigned char)value[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static const char *
+validate_received_normal_field(const unblock_h2_header_field *field)
+{
+    size_t i;
+
+    if (!field->namelen) {
+        return "HTTP/2 field name must not be empty";
+    }
+
+    for (i = 0; i < field->namelen; i++) {
+        unsigned char ch = (unsigned char)field->name[i];
+        if (ch >= 'A' && ch <= 'Z') {
+            return "HTTP/2 field names must be lowercase";
+        }
+        if (!http_token_char(ch)) {
+            return "HTTP/2 field name must be an HTTP token";
+        }
+    }
+
+    for (i = 0; i < field->valuelen; i++) {
+        unsigned char ch = (unsigned char)field->value[i];
+        if (ch <= 0x08 || (ch >= 0x0a && ch <= 0x1f) || ch == 0x7f) {
+            return "HTTP/2 field value contains a prohibited control byte";
+        }
+    }
+
+    if (bytes_equal(field->name, field->namelen, "connection")
+        || bytes_equal(field->name, field->namelen, "keep-alive")
+        || bytes_equal(field->name, field->namelen, "proxy-connection")
+        || bytes_equal(field->name, field->namelen, "transfer-encoding")
+        || bytes_equal(field->name, field->namelen, "upgrade")) {
+        return "HTTP/2 forbids connection-specific field";
+    }
+
+    if (bytes_equal(field->name, field->namelen, "te")
+        && !ascii_equal_ci(field->value, field->valuelen, "trailers")) {
+        return "HTTP/2 TE is limited to trailers";
+    }
+
+    return NULL;
+}
+
+static const char *
+validate_request_target(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len) {
+        return "request_from_headers(): target must not be empty";
+    }
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch <= 0x20 || ch == 0x7f) {
+            return "request_from_headers(): target contains spaces or control bytes";
+        }
+    }
+    return NULL;
+}
+
+static const char *
+validate_request_scheme(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len
+        || !((value[0] >= 'A' && value[0] <= 'Z')
+            || (value[0] >= 'a' && value[0] <= 'z'))) {
+        return "request_from_headers(): scheme must be a valid URI scheme";
+    }
+
+    for (i = 1; i < len; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (!((ch >= 'A' && ch <= 'Z')
+            || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9')
+            || ch == '+' || ch == '-' || ch == '.')) {
+            return "request_from_headers(): scheme must be a valid URI scheme";
+        }
+    }
+    return NULL;
+}
+
+static const char *
+validate_request_authority(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len) {
+        return "request_from_headers(): authority must not be empty";
+    }
+
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch <= 0x20 || ch == 0x7f
+            || ch == '/' || ch == '?' || ch == '#') {
+            return "request_from_headers(): authority contains a prohibited delimiter or control byte";
+        }
+    }
+    return NULL;
+}
+
+static void
+set_native_span(uhttp_native_bytes *span, const char *data, size_t len)
+{
+    span->data = data;
+    span->len = (STRLEN)len;
+}
+
+static U32
+received_native_flags(U32 kind, int complete)
+{
+    U32 flags = UHTTP_HEADERS_LOSSLESS | UHTTP_TRAILERS_LOSSLESS;
+
+    if (kind == UHTTP_KIND_REQUEST) {
+        flags |= UHTTP_TARGET_EXACT;
+    }
+
+    if (complete) {
+        flags |= UHTTP_COMPLETE;
+    }
+    else {
+        flags |= UHTTP_MUTABLE | UHTTP_BODY_MUTABLE
+            | UHTTP_TRAILERS_MUTABLE;
+    }
+
+    return flags;
+}
+
+static SV *
+request_from_native_headers(pTHX_ unblock_h2_session *ps,
+                            const unblock_h2_header_block *block,
+                            const char **error_out)
+{
+    const unblock_h2_header_field *method = NULL;
+    const unblock_h2_header_field *scheme = NULL;
+    const unblock_h2_header_field *authority = NULL;
+    const unblock_h2_header_field *path = NULL;
+    const unblock_h2_header_field *protocol = NULL;
+    uhttp_native_field *normal = NULL;
+    size_t normal_count = 0;
+    size_t i;
+    int saw_normal = 0;
+    const char *error = NULL;
+    uhttp_native_input input;
+    SV *object;
+
+    if (block->count) {
+        normal = (uhttp_native_field *)calloc(block->count, sizeof(*normal));
+        if (!normal) {
+            croak("unable to allocate HTTP/2 native request fields");
+        }
+    }
+
+    for (i = 0; i < block->count; i++) {
+        const unblock_h2_header_field *field = &block->fields[i];
+
+        if (field->namelen && field->name[0] == ':') {
+            if (saw_normal) {
+                error = "request_from_headers(): pseudo-header follows a regular field";
+                break;
+            }
+
+#define UHTTP_H2_PSEUDO(literal, slot) \
+            if (bytes_equal(field->name, field->namelen, literal)) { \
+                if (slot) { \
+                    error = "request_from_headers(): duplicate pseudo-header"; \
+                    break; \
+                } \
+                slot = field; \
+                continue; \
+            }
+            UHTTP_H2_PSEUDO(":method", method)
+            UHTTP_H2_PSEUDO(":scheme", scheme)
+            UHTTP_H2_PSEUDO(":authority", authority)
+            UHTTP_H2_PSEUDO(":path", path)
+            UHTTP_H2_PSEUDO(":protocol", protocol)
+#undef UHTTP_H2_PSEUDO
+            error = "request_from_headers(): unsupported pseudo-header";
+            break;
+        }
+
+        saw_normal = 1;
+        error = validate_received_normal_field(field);
+        if (error) {
+            break;
+        }
+
+        set_native_span(&normal[normal_count].name,
+            field->name, field->namelen);
+        set_native_span(&normal[normal_count].value,
+            field->value, field->valuelen);
+        normal_count++;
+    }
+
+    if (!error && (!method || !method->valuelen)) {
+        error = "request_from_headers(): missing :method";
+    }
+    if (!error && !span_is_token(method->value, method->valuelen)) {
+        error = "request_from_headers(): method must be an HTTP token";
+    }
+
+    if (!error && ascii_equal_ci(method->value, method->valuelen, "CONNECT")) {
+        if (!authority || !authority->valuelen) {
+            error = "request_from_headers(): CONNECT requires :authority";
+        }
+        else if (protocol) {
+            if (!protocol->valuelen) {
+                error = "request_from_headers(): extended CONNECT requires nonempty :protocol";
+            }
+            else if (!scheme || !scheme->valuelen) {
+                error = "request_from_headers(): extended CONNECT requires :scheme";
+            }
+            else if (!path || !path->valuelen) {
+                error = "request_from_headers(): extended CONNECT requires :path";
+            }
+        }
+        else if (scheme || path) {
+            error = "request_from_headers(): ordinary CONNECT must omit :scheme and :path";
+        }
+    }
+    else if (!error) {
+        if (protocol) {
+            error = "request_from_headers(): :protocol requires CONNECT";
+        }
+        else if (!scheme || !scheme->valuelen) {
+            error = "request_from_headers(): missing :scheme";
+        }
+        else if (!path || !path->valuelen) {
+            error = "request_from_headers(): missing :path";
+        }
+        else if (!authority || !authority->valuelen) {
+            error = "request_from_headers(): missing :authority";
+        }
+    }
+
+    if (!error && protocol
+        && !span_is_token(protocol->value, protocol->valuelen)) {
+        error = "request_from_headers(): protocol must be an HTTP token";
+    }
+    if (!error && scheme) {
+        error = validate_request_scheme(scheme->value, scheme->valuelen);
+    }
+    if (!error && authority) {
+        error = validate_request_authority(
+            authority->value, authority->valuelen);
+    }
+
+    if (!error) {
+        const char *target;
+        size_t target_len;
+
+        if (path) {
+            target = path->value;
+            target_len = path->valuelen;
+        }
+        else {
+            target = authority->value;
+            target_len = authority->valuelen;
+        }
+
+        error = validate_request_target(target, target_len);
+        if (!error) {
+            uhttp_native_input_init(&input, UHTTP_KIND_REQUEST);
+            input.flags = received_native_flags(
+                UHTTP_KIND_REQUEST,
+                (block->flags & NGHTTP2_FLAG_END_STREAM) ? 1 : 0);
+            set_native_span(&input.version, "2", 1);
+            set_native_span(&input.method, method->value, method->valuelen);
+            set_native_span(&input.target, target, target_len);
+            if (scheme) {
+                set_native_span(
+                    &input.scheme, scheme->value, scheme->valuelen);
+            }
+            if (authority) {
+                set_native_span(
+                    &input.authority, authority->value, authority->valuelen);
+            }
+            if (protocol) {
+                set_native_span(
+                    &input.protocol, protocol->value, protocol->valuelen);
+            }
+            input.headers = normal;
+            input.header_count = normal_count;
+            object = uhttp_native_from_validated(
+                aTHX_ &ps->uniform_api, &input, UHTTP_NATIVE_TRUSTED);
+            free(normal);
+            *error_out = NULL;
+            return object;
+        }
+    }
+
+    free(normal);
+    *error_out = error;
+    return NULL;
+}
+
+static SV *
+response_from_native_headers(pTHX_ unblock_h2_session *ps,
+                             const unblock_h2_header_block *block,
+                             const char **error_out)
+{
+    const unblock_h2_header_field *status = NULL;
+    uhttp_native_field *normal = NULL;
+    size_t normal_count = 0;
+    size_t i;
+    int saw_normal = 0;
+    IV status_value = 0;
+    const char *error = NULL;
+    uhttp_native_input input;
+    SV *object;
+
+    if (block->count) {
+        normal = (uhttp_native_field *)calloc(block->count, sizeof(*normal));
+        if (!normal) {
+            croak("unable to allocate HTTP/2 native response fields");
+        }
+    }
+
+    for (i = 0; i < block->count; i++) {
+        const unblock_h2_header_field *field = &block->fields[i];
+
+        if (field->namelen && field->name[0] == ':') {
+            size_t j;
+
+            if (saw_normal) {
+                error = "response_from_headers(): pseudo-header follows a regular field";
+                break;
+            }
+            if (!bytes_equal(field->name, field->namelen, ":status")) {
+                error = "response_from_headers(): unsupported pseudo-header";
+                break;
+            }
+            if (status) {
+                error = "response_from_headers(): duplicate pseudo-header";
+                break;
+            }
+
+            status = field;
+            for (j = 0; j < field->valuelen; j++) {
+                unsigned char ch = (unsigned char)field->value[j];
+                if (ch < '0' || ch > '9') {
+                    error = "response_from_headers(): status must be an integer from 100 through 599";
+                    break;
+                }
+                if (status_value > 599) {
+                    error = "response_from_headers(): status must be an integer from 100 through 599";
+                    break;
+                }
+                status_value = status_value * 10 + (ch - '0');
+            }
+            if (error) {
+                break;
+            }
+            continue;
+        }
+
+        saw_normal = 1;
+        error = validate_received_normal_field(field);
+        if (error) {
+            break;
+        }
+
+        set_native_span(&normal[normal_count].name,
+            field->name, field->namelen);
+        set_native_span(&normal[normal_count].value,
+            field->value, field->valuelen);
+        normal_count++;
+    }
+
+    if (!error && (!status || !status->valuelen
+        || status_value < 100 || status_value > 599)) {
+        error = "response_from_headers(): status must be an integer from 100 through 599";
+    }
+
+    if (!error) {
+        int complete = (status_value >= 100 && status_value < 200)
+            ? 1
+            : ((block->flags & NGHTTP2_FLAG_END_STREAM) ? 1 : 0);
+
+        uhttp_native_input_init(&input, UHTTP_KIND_RESPONSE);
+        input.flags = received_native_flags(UHTTP_KIND_RESPONSE, complete);
+        set_native_span(&input.version, "2", 1);
+        input.status = status_value;
+        input.headers = normal;
+        input.header_count = normal_count;
+        object = uhttp_native_from_validated(
+            aTHX_ &ps->uniform_api, &input, UHTTP_NATIVE_TRUSTED);
+        free(normal);
+        *error_out = NULL;
+        return object;
+    }
+
+    free(normal);
+    *error_out = error;
+    return NULL;
+}
+
+static AV *
+trailers_from_native_headers(pTHX_ const unblock_h2_header_block *block,
+                             const char **error_out)
+{
+    AV *headers = newAV();
+    size_t i;
+
+    for (i = 0; i < block->count; i++) {
+        const unblock_h2_header_field *field = &block->fields[i];
+        const char *error;
+        AV *pair;
+
+        if (field->namelen && field->name[0] == ':') {
+            SvREFCNT_dec((SV *)headers);
+            *error_out = "apply_trailers(): unsupported pseudo-header";
+            return NULL;
+        }
+
+        error = validate_received_normal_field(field);
+        if (error) {
+            SvREFCNT_dec((SV *)headers);
+            *error_out = error;
+            return NULL;
+        }
+
+        pair = newAV();
+        av_push(pair, newSVpvn(field->name, field->namelen));
+        av_push(pair, newSVpvn(field->value, field->valuelen));
+        av_push(headers, newRV_noinc((SV *)pair));
+    }
+
+    *error_out = NULL;
+    return headers;
+}
+
+static void
+attach_native_header_result(pTHX_ unblock_h2_session *ps,
+                            const nghttp2_frame *frame, HV *hv,
+                            unblock_h2_header_block *block)
+{
+    const char *error = NULL;
+    SV *message = NULL;
+    AV *headers = NULL;
+
+    if (!block) {
+        hv_store(hv, "header_error", 12,
+            newSVpv("HTTP/2 header block state is missing", 0), 0);
+        hv_store(hv, "header_error_code", 17,
+            newSVuv(NGHTTP2_PROTOCOL_ERROR), 0);
+        return;
+    }
+
+    if (block->error) {
+        hv_store(hv, "header_error", 12,
+            newSVpv(block->error, 0), 0);
+        hv_store(hv, "header_error_code", 17,
+            newSVuv(block->error_code), 0);
+        return;
+    }
+
+    switch (block->category) {
+        case NGHTTP2_HCAT_REQUEST:
+            if (!ps->server) {
+                error = "unexpected HTTP/2 request header category";
+                break;
+            }
+            message = request_from_native_headers(
+                aTHX_ ps, block, &error);
+            break;
+
+        case NGHTTP2_HCAT_RESPONSE:
+            if (ps->server) {
+                error = "unexpected HTTP/2 response header category";
+                break;
+            }
+            message = response_from_native_headers(
+                aTHX_ ps, block, &error);
+            break;
+
+        case NGHTTP2_HCAT_HEADERS:
+            headers = trailers_from_native_headers(
+                aTHX_ block, &error);
+            break;
+
+        default:
+            error = "unsupported HTTP/2 header category";
+            break;
+    }
+
+    if (error) {
+        hv_store(hv, "header_error", 12, newSVpv(error, 0), 0);
+        hv_store(hv, "header_error_code", 17,
+            newSVuv(NGHTTP2_PROTOCOL_ERROR), 0);
+        return;
+    }
+
+    if (message) {
+        hv_store(hv, "uniform_message", 15, message, 0);
+    }
+    else if (headers) {
+        hv_store(hv, "native_headers", 14,
+            newRV_noinc((SV *)headers), 0);
+    }
+}
+
+static int
 call_scalar_callback(pTHX_ unblock_h2_session *ps, SV *callback, AV *args)
 {
     dSP;
