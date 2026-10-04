@@ -830,27 +830,40 @@ mem_send(self)
     PREINIT:
         unblock_h2_session *ps;
         const uint8_t *data = NULL;
-        ssize_t rv;
+        ssize_t rv = 0;
+        SV *output;
     CODE:
         ps = session_from_sv(aTHX_ self);
         if (ps->in_session_call) {
             croak("mem_send called from inside an HTTP/2 callback");
         }
         clear_callback_error(aTHX_ ps);
+        output = newSVpvn("", 0);
 
         ENTER;
         SAVEINT(ps->in_session_call);
         ps->in_session_call = 1;
-        rv = nghttp2_session_mem_send(ps->session, &data);
+        for (;;) {
+            rv = nghttp2_session_mem_send(ps->session, &data);
+            if (rv <= 0) {
+                break;
+            }
+            sv_catpvn(output, (const char *)data, (STRLEN)rv);
+        }
         LEAVE;
         drain_pending_free(aTHX_ ps);
-        croak_callback_error(aTHX_ ps);
+
+        if (ps->callback_error) {
+            SvREFCNT_dec(output);
+            croak_callback_error(aTHX_ ps);
+        }
 
         if (rv < 0) {
+            SvREFCNT_dec(output);
             croak("nghttp2_session_mem_send failed (%ld): %s",
                 (long)rv, nghttp2_strerror((int)rv));
         }
-        RETVAL = newSVpvn(data ? (const char *)data : "", (STRLEN)rv);
+        RETVAL = output;
     OUTPUT:
         RETVAL
 
