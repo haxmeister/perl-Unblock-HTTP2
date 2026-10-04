@@ -2,337 +2,242 @@
 
 ## Purpose
 
-Unblock::HTTP2 is the reusable HTTP/2 protocol engine.
+Unblock::HTTP2 is a reusable HTTP/2 protocol engine.
 
-It sits below HTTP client/server policy and above an arbitrary byte transport.
+It sits between HTTP message objects and an arbitrary byte transport.
 
-    application or HTTP policy
-              |
-              v
-         Unblock::HTTP2
-              |
-              v
-     transport chosen by caller
+```text
+application or HTTP policy
+        |
+  Uniform::HTTP messages
+        |
+   Unblock::HTTP2
+        |
+   byte transport
+```
 
-The transport may be TCP, TLS, an event-loop stream, a blocking socket, an
+The transport may be an event-loop stream, TLS stream, blocking socket,
 in-memory connection, or another byte carrier.
+
+Unblock::HTTP2 does not know how the transport is scheduled.
 
 ## Byte boundary
 
-The core transport contract is deliberately not an object interface.
+Incoming bytes are passed to:
 
-Incoming bytes:
+```perl
+$engine->input($bytes);
+```
 
-    $engine->input($bytes);
+Outgoing bytes are drained with:
 
-Outgoing bytes:
+```perl
+while ($engine->want_write) {
+    my $bytes = $engine->output;
+    last unless length $bytes;
+    ...
+}
+```
 
-    while ($engine->want_write) {
-        my $bytes = $engine->output;
-        last unless length $bytes;
-        ...
-    }
+`want_read()` reports whether the HTTP/2 session still expects protocol input.
+It does not register a watcher or read from a socket.
 
-The engine therefore does not know how writes are queued or when a file
-descriptor is writable.
-
-want_read() reports whether nghttp2 still expects protocol input. It does not
-register a read watcher.
+TLS, ALPN, connection setup, and HTTP/1 upgrade negotiation stay outside this
+boundary.
 
 ## Messages
 
-Requests and responses are Uniform::HTTP 0.04 objects:
+HTTP messages are:
 
-    Uniform::HTTP::Request
-    Uniform::HTTP::Response
+```text
+Uniform::HTTP::Request
+Uniform::HTTP::Response
+```
 
-Received HTTP/2 pseudo-headers map as follows:
+HTTP/2 pseudo-headers map to Uniform fields:
 
-    :method     -> method
-    :path       -> target
-    :scheme     -> scheme
-    :authority  -> authority
-    :protocol   -> protocol
-    :status     -> status
+```text
+:method     -> method
+:path       -> target
+:scheme     -> scheme
+:authority  -> authority
+:protocol   -> protocol
+:status     -> status
+```
 
-Pseudo-headers are not inserted into the ordinary field list. Both receive
-and send paths enforce the request-shape rules used by the mapping: ordinary
-requests require a nonempty path target, ordinary CONNECT omits scheme/path,
-and Extended CONNECT requires a nonempty protocol, scheme, authority, and path.
+Ordinary headers and trailers remain separate Uniform field lists.
 
-Ordinary fields map to Uniform headers. A later HTTP/2 HEADERS block maps to
-the separate Uniform trailer section.
+Received initial metadata is frozen after validation. The message remains
+incomplete while body data or trailers can still arrive. END_STREAM completes
+and freezes the message.
 
-For received messages, Unblock creates canonical Uniform objects. Once the
-initial field block has been validated it calls freeze_initial(), leaving the
-message incomplete while DATA and trailers may still arrive. END_STREAM makes
-the message complete and fully frozen.
-
-For outgoing messages, Unblock does not take ownership of the application's
-Uniform object. A neutral version value of undef is valid and is not rewritten
-to 2 just because the HTTP/2 engine was selected.
-
-## CONNECT
-
-Ordinary CONNECT maps to:
-
-    :method     CONNECT
-    :authority  host:port
-
-with the exact authority-form target represented by Uniform.
-
-Extended CONNECT maps Uniform protocol metadata to :protocol and retains
-scheme, authority, and path. The protocol value is generic; WebSocket,
-CONNECT-UDP, WebTransport, and other tunnel semantics remain outside this
-distribution.
-
-The server advertises SETTINGS_ENABLE_CONNECT_PROTOCOL by default because the
-engine understands the generic Extended CONNECT message form. A host can turn
-that advertisement off.
-
-The client queries libnghttp2's effective remote SETTINGS before sending
-Extended CONNECT. It refuses :protocol until the peer has advertised
-SETTINGS_ENABLE_CONNECT_PROTOCOL = 1. The same remote SETTINGS view is used to
-cap locally opened streams by the peer's SETTINGS_MAX_CONCURRENT_STREAMS.
+Outgoing application messages remain application-owned. Unblock does not
+rewrite them merely to stamp an HTTP version onto the object.
 
 ## Streams
 
-One Unblock::HTTP2::Stream represents one HTTP/2 stream.
+One `Unblock::HTTP2::Stream` represents one HTTP/2 stream.
 
-A Stream owns:
+A Stream tracks:
 
-- stream id
+- stream ID
 - request
 - response when available
-- local streaming body production
-- cancellation
-- terminal stream state
+- local body production
+- received body credit
+- reset information
+- terminal state
 
-A Stream does not own the connection transport.
+Many Streams can be active on one Client or Server connection.
 
-HTTP/2 half-close state matters. A client can receive a complete Response while
-its streaming Request body is still open. Response completion therefore does
-not by itself make the Stream terminal. The Stream becomes complete when
-nghttp2 closes the full HTTP/2 stream normally.
+HTTP/2 half-close is preserved. One direction may finish while the other
+direction remains open.
 
-## Bodies and trailers
+## Bodies and backpressure
 
-Uniform body() represents a complete buffered body. Incremental transfer stays
-on the Unblock Stream.
+Buffered bodies can live on the Uniform message.
 
-Streaming local bodies use a small per-stream queue.
+Streaming local bodies use `write()` and `end()`.
 
-Current cooperative thresholds:
+The default cooperative queue thresholds are:
 
-    high water: 65,536 bytes
-    low water:  32,768 bytes
+```text
+high water  65536 bytes
+low water   32768 bytes
+```
 
-write() always accepts the supplied bytes. It returns false when the queue
-reaches the high-water mark. nghttp2 pulls bytes from the queue as protocol and
-flow-control credit permit. Once the queue falls below the low-water mark,
-on_drain is delivered after the current nghttp2 call has returned.
+`write()` accepts the bytes even when it returns false. A false return tells
+the producer to pause until `on_drain` runs.
 
-Receive flow control uses nghttp2 with automatic WINDOW_UPDATE disabled.
-Connection-level DATA credit is released as bytes are delivered into the
-Unblock stream, while stream-level credit is released separately. Streams
-auto-consume delivered body bytes by default after their body callback returns.
+Incoming body bytes are automatically consumed after the body callback returns.
 
-A caller can disable automatic consumption on one Stream with
-auto_consume(0). Delivered-but-unreleased bytes are then bounded by that
-stream's HTTP/2 receive window. consume($bytes) releases stream-level credit as
-the application actually processes data. This keeps a slow stream from
-unnecessarily consuming the shared connection window and blocking unrelated
-streams.
+A Stream can disable that behavior with:
 
-When an outgoing Uniform message contains trailers, the final DATA deliberately
-reserves END_STREAM and Unblock submits the Uniform trailer fields as the
-terminal HEADERS block. For a streaming body, trailer fields are snapshotted
-when end() is called.
+```perl
+$stream->auto_consume(0);
+```
 
-Incoming trailing HEADERS are validated as ordinary HTTP/2 fields, added to the
-Uniform trailer section, then frozen before message completion is reported.
+The application then returns stream-level flow-control credit with
+`consume($bytes)`.
 
-## Stream reset facts
+Connection-level credit is kept moving separately so one slow stream does not
+needlessly block unrelated streams.
 
-RST_STREAM is a transport-protocol fact, while retry policy belongs above the
-engine. Unblock therefore preserves the numeric HTTP/2 error code on Stream
-objects and records whether the reset was received from the peer or initiated
-locally.
+## Trailers and informational responses
 
-cancel() is the convenience form for the CANCEL code. reset($error_code)
-allows a caller to submit another explicit 32-bit HTTP/2 error code, such as
-REFUSED_STREAM. Incoming reset codes are passed through to stream and server
-error callbacks as an additional argument.
+Uniform trailer fields are sent as trailing HEADERS.
 
-Unblock::HTTP2 publishes the standard RFC error-code constants and can map
-known numeric values back to symbolic names. It does not automatically retry a
-REFUSED_STREAM or reinterpret one reset reason as another.
+For a streaming local body, trailer fields are snapshotted when `end()` is
+called.
 
-## SETTINGS control plane
+Servers can send one or more informational responses with `inform()` before
+the final `respond()`.
 
-SETTINGS is part of the public protocol engine rather than a private backend
-escape hatch. Client and Server accept an initial settings hash, expose the
-locally advertised values and libnghttp2's effective peer values, and can
-submit later SETTINGS changes.
+## CONNECT
 
-Peer SETTINGS frames are surfaced as protocol facts through on_settings. The
-callback receives both the current effective peer snapshot and the values that
-changed in that frame. SETTINGS acknowledgements are matched in submission
-order and surfaced through on_settings_ack. settings_pending() reports the
-number of locally submitted SETTINGS frames still awaiting ACK.
+Ordinary CONNECT uses the authority-form target.
 
-The public layer validates RFC value ranges before asking libnghttp2 to submit
-a frame. It also enforces endpoint-role and extension semantics that are part
-of the HTTP/2 protocol surface: SETTINGS_ENABLE_PUSH can only be sent by a
-client, and SETTINGS_ENABLE_CONNECT_PROTOCOL cannot be changed from 1 back to
-0 after being advertised.
+Extended CONNECT maps the Uniform `protocol` field to `:protocol`.
 
-The private binding remains responsible for SETTINGS frame processing and
-effective state. It only exposes the received identifier/value pairs needed to
-describe peer changes without exposing nghttp2 objects to callers.
+The server advertises `SETTINGS_ENABLE_CONNECT_PROTOCOL` by default. The
+client will not send Extended CONNECT until the peer has enabled it.
 
-## Extensible prioritization
+The tunneled protocol remains outside Unblock::HTTP2.
 
-RFC 9113 deprecates the original HTTP/2 dependency-tree priority scheme.
-Unblock therefore uses RFC 9218 extensible priorities.
+## Connection controls
 
-Both endpoints advertise SETTINGS_NO_RFC7540_PRIORITIES = 1 in their initial
-SETTINGS frame by default. The setting is represented by the portable public
-name no_rfc7540_priorities and cannot change value after the first SETTINGS
-frame.
+SETTINGS, PING, GOAWAY, and modern priority signaling are public protocol
+operations.
 
-Initial priority can travel in the normal HTTP Priority header through
-Uniform::HTTP. A client Stream can later send a PRIORITY_UPDATE using
-update_priority($field_value). The update carries the complete Priority field
-value as opaque protocol bytes so future priority parameters do not require a
-new Unblock API.
+SETTINGS can be supplied at construction and changed later with
+`update_settings()`. The engine exposes both local and effective peer values.
 
-The server enables nghttp2's built-in PRIORITY_UPDATE receiver. nghttp2 parses
-and applies the signal to its scheduling state; Unblock additionally exposes
-the prioritized stream id and original field value through on_priority for
-hosts that want their own scheduling or observability policy.
+Supported public setting names are:
 
-## PING control frames
+```text
+header_table_size
+enable_push
+max_concurrent_streams
+initial_window_size
+max_frame_size
+max_header_list_size
+enable_connect_protocol
+no_rfc7540_priorities
+```
 
-PING is exposed as a connection-level protocol primitive. ping($opaque)
-requires exactly eight bytes and submits one non-ACK PING. Received PING and
-PING ACK frames preserve those bytes and are surfaced separately through
-on_ping and on_ping_ack.
+PING carries exactly eight opaque bytes.
 
-libnghttp2 retains responsibility for protocol validation and for automatically
-submitting the mandatory ACK to a non-ACK PING. Unblock does not add timer,
-keepalive, health-check, or timeout policy. A host can measure round-trip time
-or decide when a missing ACK matters without changing the protocol engine.
+`drain()` sends a graceful `NO_ERROR` GOAWAY. `goaway()` allows an explicit
+error code, debug data, and last-stream boundary.
 
-## Fatal session failures
+Received GOAWAY facts are preserved for the higher layer. Unblock does not
+decide whether a request should be retried.
 
-input() and output() are the boundary around nghttp2 memory I/O. A negative or
-otherwise fatal nghttp2 receive/send result is surfaced as a Perl exception,
-but the engine first transitions to closed state and fails any still-active
-streams. close_reason() retains the failure text.
+RFC 9218 extensible priority signaling is supported. The deprecated RFC 7540
+dependency-tree priority model is not exposed.
 
-This is intentionally different from an invalid HTTP/2 frame that nghttp2 can
-handle at the protocol layer by queuing RST_STREAM or GOAWAY. Recoverable
-protocol handling keeps the session alive as allowed by nghttp2; fatal backend
-failure makes the Unblock engine unusable.
+## Resets and errors
 
-## Frame validation and extension behavior
+`cancel()` sends the standard CANCEL reset.
 
-libnghttp2 remains authoritative for HTTP/2 frame and connection-state
-validation. Its on-invalid-frame callback is exposed symmetrically by Client
-and Server as on_invalid_frame. Unblock passes a copied frame-description hash
-and the numeric nghttp2 validation error to the host for observability.
+`reset($error_code)` sends an explicit RST_STREAM reason.
 
-The callback does not replace protocol handling. nghttp2 automatically submits
-the appropriate RST_STREAM or GOAWAY for an invalid non-DATA frame.
+Received reset codes are preserved on the Stream together with whether the
+reset came from the peer.
 
-Unknown frame types are not protocol errors. HTTP/2 requires endpoints to
-ignore unsupported extension frame types, so Unblock leaves that behavior
-untouched and does not surface them through on_invalid_frame.
+Fatal libnghttp2 input or output failures close the engine and preserve
+`close_reason()` before the exception is rethrown.
 
-nghttp2's error_callback2 is solely a library debugging/logging facility.
-Unblock does not reinterpret it as an HTTP/2 application error. In particular,
-server on_error remains a stream/application error callback rather than a
-channel for nghttp2 diagnostic strings.
+Recoverable protocol errors remain under libnghttp2 control. Invalid-frame
+observation is available without replacing libnghttp2's required protocol
+response.
 
-## Graceful draining
+Unknown extension frame types are ignored as required by HTTP/2.
 
-Client and Server expose drain() as the graceful connection-shutdown operation.
-It submits a NO_ERROR GOAWAY and prevents new locally initiated client streams
-while letting streams already accepted by the peer finish normally.
+## Server Push
 
-goaway() is the lower-level control operation. It accepts an explicit 32-bit
-HTTP/2 error code, opaque debug bytes, and optionally a 31-bit last-stream
-boundary. The engine retains the latest locally submitted GOAWAY facts through
-local_goaway(). Successive GOAWAY frames may only keep or lower the
-last-stream-id boundary, matching the protocol's monotonic shutdown rule.
+Server Push is intentionally not exposed.
 
-The server remembers the highest peer-initiated request stream it has seen and
-uses that value when initiating GOAWAY. The client advertises ENABLE_PUSH = 0,
-so its locally initiated GOAWAY can use last-stream-id zero without pretending
-to support server-initiated push streams.
+Clients advertise:
 
-Received GOAWAY also places the engine in draining state. The engine preserves
-the peer's last stream ID, HTTP/2 error code, and debug data so a higher layer
-can make its own retry decision. Retry policy remains above this engine.
+```text
+SETTINGS_ENABLE_PUSH = 0
+```
 
-## Reentrancy
+This keeps the public API focused on the modern HTTP/2 features that remain
+useful to new applications.
 
-input() drives nghttp2_session_mem_recv.
+## Private nghttp2 binding
 
-output() drives nghttp2_session_mem_send.
+libnghttp2 owns the low-level HTTP/2 machinery:
 
-Neither operation may recursively call the other from an nghttp2 callback.
-If connection close is requested from inside a callback, destruction is
-deferred until that nghttp2 call returns.
+- frame encoding and decoding
+- HPACK
+- protocol state validation
+- SETTINGS mechanics
+- connection and stream flow control
 
-## TLS and ALPN
+Unblock::HTTP2 uses a small private XS binding named
+`Unblock::HTTP2::_nghttp2`.
 
-TLS and ALPN are outside Unblock::HTTP2.
+That binding is not public API. It knows nothing about Uniform::HTTP or event
+loops.
 
-A host that uses HTTPS normally performs:
+The Perl layer owns the portable API, message mapping, stream objects, and
+transport boundary.
 
-    connect transport
-    perform TLS handshake
-    ALPN selects h2
-    create/use Unblock::HTTP2 engine
-    feed decrypted HTTP/2 bytes
+## Integration
 
-Cleartext HTTP/2 can feed bytes directly without TLS.
+An adapter around Unblock::HTTP2 normally owns:
 
-HTTP/1 Upgrade negotiation is also outside this distribution. An HTTP/1 engine
-can hand the resulting byte stream to Unblock::HTTP2 after the protocol switch.
-
-## Linux::Event integration
-
-Linux::Event::HTTP can become one caller of this engine.
-
-The Linux::Event adapter should own:
-
-- Stream connection objects
-- TLS and ALPN
+- socket or stream objects
+- TLS
+- ALPN
 - readiness
-- native transport output
+- output queuing
 - connection pooling
 - HTTP/1 fallback
-- high-level Transaction integration
+- retry and redirect policy
 
-It should not reimplement HTTP/2 framing, stream state, HPACK, SETTINGS,
-GOAWAY, trailer framing, Extended CONNECT pseudo-header mapping, or flow
-control.
-
-## nghttp2
-
-libnghttp2 remains the low-level protocol engine. It owns frame
-encoding/decoding, HPACK, HTTP/2 state validation, SETTINGS mechanics, and
-connection/stream flow control.
-
-Unblock::HTTP2 talks to libnghttp2 through the private
-Unblock::HTTP2::_nghttp2 XS binding in this distribution. The binding is kept
-small: it exposes protocol facts and operations needed by Unblock, including
-memory I/O, callbacks, DATA providers, remote SETTINGS, generic HEADERS,
-trailers, RST_STREAM, and GOAWAY details.
-
-The private binding does not know about Uniform::HTTP and is not a supported
-public API. Unblock::HTTP2 owns the Perl-facing stream/message mapping and the
-portable byte-engine boundary around libnghttp2.
+The adapter should not reimplement HTTP/2 framing, HPACK, stream state,
+SETTINGS, flow control, trailers, or GOAWAY handling.

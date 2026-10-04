@@ -287,37 +287,86 @@ __END__
 
 =head1 NAME
 
-Unblock::HTTP2::Stream - One HTTP/2 stream
+Unblock::HTTP2::Stream - one HTTP/2 stream
 
 =head1 DESCRIPTION
 
-A Stream is one HTTP/2 request/response exchange inside a multiplexed
-connection. It owns stream lifecycle, not the underlying socket or event loop.
+A Stream represents one multiplexed HTTP/2 request/response exchange.
 
-C<request()> and C<response()> return Uniform HTTP message objects.
+C<request()> returns the Uniform request. C<response()> returns the Uniform
+response once one is available.
 
-For a streaming local body, C<write()> queues bytes and C<end()> finishes body
-production. C<write()> returns false when the per-stream cooperative high-water
-mark is reached. The bytes are still accepted; wait for C<on_drain> before
-producing more.
+=head1 STREAMING BODIES
 
-Server streams use C<inform()> for non-final informational responses and
-C<respond()> for the final Uniform response.
+For a streaming local body:
 
-C<reset($error_code)> sends RST_STREAM with an explicit HTTP/2 error code.
-C<cancel()> is the C<CANCEL> convenience form. C<error_code()>,
-C<error_name()>, and C<reset_by_peer()> preserve reset facts for higher-layer
-retry and policy decisions.
+    $stream->write($chunk);
+    $stream->end($last_chunk);
 
-Client streams can use C<update_priority($field_value)> to send an RFC 9218
-PRIORITY_UPDATE after the peer has enabled extensible priorities. The field
-value uses the standard Priority field syntax, for example C<u=0, i>.
+C<write()> always accepts the bytes. A false return means the cooperative
+high-water mark was reached. Wait for C<on_drain> before producing more.
 
-Incoming body bytes are automatically credited back to the peer after the body
-callback returns. For application-driven receive backpressure, disable that on
-an individual stream with C<auto_consume(0)>. C<unconsumed_bytes()> reports
-delivered bytes that have not yet been credited, and C<consume($bytes)> releases
-that many stream-level flow-control bytes. Re-enable C<auto_consume(1)> to
-release any outstanding bytes and return to automatic consumption.
+Incoming body bytes are consumed automatically after the body callback returns.
+
+For manual receive flow control:
+
+    $stream->auto_consume(0);
+    $stream->consume($bytes_processed);
+
+C<unconsumed_bytes()> reports body bytes still waiting for stream-level credit.
+
+=head1 SERVER RESPONSES
+
+A server Stream can send an informational response with:
+
+    $stream->inform($response);
+
+The final response uses:
+
+    $stream->respond($response);
+
+Pass C<stream_body =E<gt> 1> to C<respond()> to produce the response body with
+C<write()> and C<end()>.
+
+=head1 RESETS
+
+C<cancel()> sends the standard HTTP/2 CANCEL reset.
+
+C<reset($error_code)> sends an explicit RST_STREAM reason.
+
+The Stream preserves:
+
+    error
+    error_code
+    error_name
+    reset_by_peer
+
+These facts are exposed for higher-level retry and policy decisions.
+
+=head1 PRIORITY
+
+Client Streams can use C<update_priority($field_value)> to send an RFC 9218
+PRIORITY_UPDATE after the peer has enabled modern priorities.
+
+=head1 STATE
+
+Useful state accessors include:
+
+    id
+    state
+    is_complete
+    is_cancelled
+    is_terminal
+
+HTTP/2 half-close is preserved. One direction may finish before the full Stream
+becomes terminal.
+
+=head1 SEE ALSO
+
+L<Unblock::HTTP2>, L<Unblock::HTTP2::Client>, L<Unblock::HTTP2::Server>
+
+=head1 LICENSE
+
+MIT License.
 
 =cut

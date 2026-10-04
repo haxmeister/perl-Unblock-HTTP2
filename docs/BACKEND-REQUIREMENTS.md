@@ -1,155 +1,100 @@
-# Backend requirements
+# Private nghttp2 backend
 
-Unblock::HTTP2 uses libnghttp2 directly through the private
-Unblock::HTTP2::_nghttp2 XS binding contained in this distribution.
+Unblock::HTTP2 uses libnghttp2 through the private
+`Unblock::HTTP2::_nghttp2` XS binding.
 
-The binding is intentionally small. It exists to expose the libnghttp2
-operations and protocol facts required by Unblock without creating another
-public HTTP/2 API.
+This file records the contract that private binding must continue to provide.
+It is not a second public HTTP/2 API.
 
-## Responsibilities
+## libnghttp2 owns
 
 libnghttp2 remains responsible for:
 
 - HTTP/2 frame encoding and decoding
 - HPACK
-- protocol validation
-- stream state
+- stream and connection state validation
 - SETTINGS state
-- flow control
+- connection and stream flow control
+- mandatory protocol responses
 
-The private binding exposes only the pieces Unblock needs:
+## The private binding exposes
 
-- client and server session lifecycle
+The Perl layer needs:
+
+- client and server session creation
 - memory input and output
-- frame, header, DATA, error, and stream-close callbacks
-- local SETTINGS submission
-- effective remote SETTINGS queries
-- received SETTINGS identifier/value details and ACK flags
-- invalid non-DATA frame callbacks with frame metadata and nghttp2 error codes
-- RFC 9218 PRIORITY_UPDATE submission and built-in receive processing
+- frame, header, DATA, invalid-frame, and stream-close callbacks
 - request and response submission
-- GOAWAY submission with explicit last-stream id, error code, and debug bytes
 - generic HEADERS submission
-- deferred DATA providers and resume
+- DATA providers and resume
 - trailers
-- RST_STREAM submission and received error-code details
-- PING submission and received opaque-data details
-- GOAWAY submission and received GOAWAY details
+- RST_STREAM
+- SETTINGS submission and effective peer SETTINGS
+- PING
+- GOAWAY
+- RFC 9218 PRIORITY_UPDATE
 - stream half-close queries
-- disabled automatic receive WINDOW_UPDATE
-- independent connection and stream consumption credit
+- separate connection and stream receive-credit release
 
-Uniform::HTTP message construction and validation remain in Perl.
+The binding returns protocol facts. It does not create Uniform::HTTP objects or
+make application policy decisions.
 
-## Remote SETTINGS
+## SETTINGS
 
-The private binding queries libnghttp2's effective remote SETTINGS directly.
+Received SETTINGS identifier/value pairs are exposed to Perl so Unblock can
+report changes with portable setting names.
 
-Unblock uses this to enforce SETTINGS_ENABLE_CONNECT_PROTOCOL before sending
-Extended CONNECT and to combine the local active-stream cap with the peer's
-SETTINGS_MAX_CONCURRENT_STREAMS.
-
-The binding also exposes the identifier/value pairs carried by received
-SETTINGS frames and the normal frame flags. Unblock maps known identifiers to
-portable public setting names, reports peer changes, and tracks outbound
-SETTINGS acknowledgements without exposing raw nghttp2 objects.
+Effective peer SETTINGS are queried from libnghttp2. The public layer uses
+those values for features such as Extended CONNECT and peer stream limits.
 
 ## Receive flow control
 
-Sessions are created with nghttp2_option_set_no_auto_window_update enabled.
+Sessions disable automatic WINDOW_UPDATE.
 
-For every received DATA chunk the private binding releases connection-level
-credit with nghttp2_session_consume_connection. Stream-level credit is kept
-separate and released with nghttp2_session_consume_stream only when the public
-Stream consumption policy allows it.
+Connection-level credit and stream-level credit are released separately.
 
-This split is deliberate. It permits one application-stalled stream to stop its
-own WINDOW_UPDATE progress without exhausting the shared connection window and
-stalling unrelated streams.
+This lets Unblock keep the shared connection moving while allowing one Stream
+to delay its own credit until the application has consumed body bytes.
 
-Unblock does not use nghttp2_submit_window_update as a substitute for
-application-consumption accounting.
+## DATA providers
 
-## Informational responses
+Streaming local bodies are supplied through deferred DATA providers.
 
-Generic non-final HEADERS submission is available through the private binding.
+The provider may pause when no body bytes are available and resume later when
+the application writes more data.
 
-The public server API is Stream->inform($response). It accepts a Uniform
-informational Response and leaves the stream available for later informational
-responses and the final Stream->respond($response).
+Provider storage must not be freed while libnghttp2 is still using it. Cleanup
+requested during a native callback is deferred until the active nghttp2 call
+returns.
 
-## Stream resets
+## Errors and resets
 
-nghttp2's stream-close callback includes the HTTP/2 error code used to close a
-stream. The Perl layer must preserve that code rather than flattening every
-RST_STREAM into a generic string.
+The stream-close callback must preserve the HTTP/2 error code.
 
-Explicit local reset uses nghttp2_submit_rst_stream with the caller's validated
-32-bit error code. CANCEL remains only a convenience default; the private
-binding does not choose retry semantics.
+Local reset submission must accept an explicit validated 32-bit error code.
 
-## Invalid frame handling
+Invalid non-DATA frames expose frame metadata and the nghttp2 validation error
+for observation. libnghttp2 remains responsible for the actual RST_STREAM or
+GOAWAY response.
 
-The private binding registers nghttp2's on_invalid_frame_recv callback. The
-callback converts the frame header and any already-supported frame details into
-a plain Perl hash and also returns the numeric nghttp2 library error code.
+The nghttp2 diagnostic logging callback is not application protocol state and
+must not be routed through the public error API.
 
-The public engine uses this only for observation. nghttp2 remains responsible
-for automatically submitting the corresponding RST_STREAM or GOAWAY.
+## Modern priorities
 
-The binding also contains nghttp2's optional error logging callback support,
-but that callback is diagnostic output rather than protocol state and is not
-wired to the public Client or Server error API.
+The backend must support:
 
-## Extensible priorities
+```text
+SETTINGS_NO_RFC7540_PRIORITIES
+PRIORITY_UPDATE
+```
 
-Alien::nghttp2 0.003 requires libnghttp2 1.57.0 or newer, which includes the
-RFC 9218 implementation added in nghttp2 1.48.0.
-
-The server session enables NGHTTP2_PRIORITY_UPDATE as a built-in received
-extension type. Received extension payloads expose the prioritized stream id
-and complete Priority field value to the Perl layer while nghttp2 retains its
-normal parsing and scheduling state.
-
-The client submits updates with nghttp2_submit_priority_update. The public
-layer sends them only after the peer's effective
-SETTINGS_NO_RFC7540_PRIORITIES value is 1.
-
-## PING
-
-The private binding exposes nghttp2_submit_ping for non-ACK PING submission and
-includes the eight opaque payload bytes on received PING frame callbacks.
-libnghttp2's automatic PING ACK behavior remains enabled.
-
-The public layer distinguishes PING from PING ACK using the frame ACK flag. It
-does not disable automatic acknowledgement or implement liveness timers.
-
-## GOAWAY
-
-Received GOAWAY callback data includes:
-
-- last stream ID
-- HTTP/2 error code
-- debug data
-
-Client and Server retain this as peer_goaway() information while entering
-draining state.
-
-Automatic replay or retry policy remains outside Unblock.
-
-## Server push
-
-Server push is still deliberately not exposed.
-
-The client advertises SETTINGS_ENABLE_PUSH = 0 until push is intentionally
-given a public Unblock model. The private binding should remain easy to extend
-with PUSH_PROMISE support later, but push is not required by the current
-engine.
+The public layer sends PRIORITY_UPDATE only when the peer has enabled the RFC
+9218 model.
 
 ## Portability
 
-The binding must continue to work with:
+The private binding must continue to work with:
 
 - Perl 5.16 and newer
 - threaded and multiplicity Perl builds
@@ -157,21 +102,17 @@ The binding must continue to work with:
 - macOS
 - Strawberry Perl on Windows
 
-PERL_NO_GET_CONTEXT is enabled. Native callbacks that use Perl APIs establish
-an interpreter context with dTHX. Native storage uses ordinary C allocation,
-so a callback without a Perl context does not accidentally invoke Perl
-allocator macros.
+Native callbacks that use Perl APIs must establish the correct interpreter
+context.
 
-Outgoing bytes use nghttp2_session_mem_send directly. The binding does not
-maintain a second send buffer.
+Outgoing protocol bytes are returned directly from
+`nghttp2_session_mem_send`; the binding does not maintain a second transport
+send queue.
 
-## Reentrancy and ownership
+## Reentrancy
 
-Unblock prevents recursive input/output calls while libnghttp2 is executing.
+Recursive `input()` or `output()` while libnghttp2 is already executing is
+not allowed.
 
-The binding also defers freeing a DATA provider that is released from inside an
-active libnghttp2 call. Perl callbacks and provider state are released only
-after the native call unwinds.
-
-This protects callback-driven cancellation, connection close, stream close,
-and Perl object destruction from use-after-free and double-free hazards.
+Connection or provider cleanup requested from inside a native callback is
+deferred until the nghttp2 call unwinds.

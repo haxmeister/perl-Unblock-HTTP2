@@ -16,6 +16,7 @@ lib/Unblock/HTTP2/_Headers.pm
 lib/Unblock/HTTP2/_nghttp2.pm
 nghttp2.xs
 t/00-load.t
+t/01-version.t
 t/10-headers.t
 t/20-memory-loopback.t
 t/21-streaming-loopback.t
