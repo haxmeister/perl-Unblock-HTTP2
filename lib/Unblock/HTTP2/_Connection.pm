@@ -16,6 +16,7 @@ my @SETTING_NAMES = qw(
     max_frame_size
     max_header_list_size
     enable_connect_protocol
+    no_rfc7540_priorities
 );
 
 my %SETTING_ID = (
@@ -26,6 +27,7 @@ my %SETTING_ID = (
     max_frame_size          => 5,
     max_header_list_size    => 6,
     enable_connect_protocol => 8,
+    no_rfc7540_priorities    => 9,
 );
 
 my %SETTING_NAME = reverse %SETTING_ID;
@@ -202,6 +204,43 @@ sub _handle_ping_frame {
     return 1;
 }
 
+sub _update_stream_priority {
+    my ($self, $stream, $field_value) = @_;
+
+    croak 'update_priority(): connection is closed'
+        if $self->{closed} || !$self->{session};
+    croak 'update_priority(): only clients can send PRIORITY_UPDATE'
+        unless $self->{role} eq 'client';
+
+    my $bytes = $self->_body_bytes('update_priority()', $field_value);
+    croak 'update_priority(): field value exceeds HTTP/2 PRIORITY_UPDATE limit'
+        if length($bytes) > 16_380;
+
+    my $enabled = $self->peer_setting('no_rfc7540_priorities');
+    croak 'update_priority(): peer has not enabled RFC 9218 priorities'
+        unless $enabled == 1;
+
+    $self->{session}->submit_priority_update($stream->id, $bytes);
+    return;
+}
+
+sub _handle_priority_update_frame {
+    my ($self, $frame) = @_;
+    return 0 unless (($frame->{type} // -1) == 0x10);
+
+    my $stream_id = 0 + ($frame->{prioritized_stream_id} || 0);
+    my $field_value = defined($frame->{priority_field_value})
+        ? "$frame->{priority_field_value}"
+        : '';
+
+    $self->_invoke_control_callback(
+        'on_priority',
+        $stream_id,
+        $field_value,
+    );
+    return 1;
+}
+
 sub local_settings {
     my ($self) = @_;
     return { %{ $self->{local_settings} || {} } };
@@ -308,7 +347,8 @@ sub _validate_settings {
         $value = 0 + $value;
 
         if ($name eq 'enable_push'
-            || $name eq 'enable_connect_protocol') {
+            || $name eq 'enable_connect_protocol'
+            || $name eq 'no_rfc7540_priorities') {
             croak "$operation $name must be zero or one"
                 unless $value == 0 || $value == 1;
         }
@@ -332,6 +372,13 @@ sub _validate_settings {
         && ($self->{local_settings}{enable_connect_protocol} || 0) == 1
         && $settings{enable_connect_protocol} == 0) {
         croak "$operation enable_connect_protocol cannot return to zero after one";
+    }
+
+    if (exists $settings{no_rfc7540_priorities}
+        && exists $self->{local_settings}{no_rfc7540_priorities}
+        && $settings{no_rfc7540_priorities}
+            != $self->{local_settings}{no_rfc7540_priorities}) {
+        croak "$operation no_rfc7540_priorities cannot change after the first SETTINGS frame";
     }
 
     if ($self->{role} eq 'client') {
