@@ -220,6 +220,25 @@ submitting the mandatory ACK to a non-ACK PING. Unblock does not add timer,
 keepalive, health-check, or timeout policy. A host can measure round-trip time
 or decide when a missing ACK matters without changing the protocol engine.
 
+## Frame validation and extension behavior
+
+libnghttp2 remains authoritative for HTTP/2 frame and connection-state
+validation. Its on-invalid-frame callback is exposed symmetrically by Client
+and Server as on_invalid_frame. Unblock passes a copied frame-description hash
+and the numeric nghttp2 validation error to the host for observability.
+
+The callback does not replace protocol handling. nghttp2 automatically submits
+the appropriate RST_STREAM or GOAWAY for an invalid non-DATA frame.
+
+Unknown frame types are not protocol errors. HTTP/2 requires endpoints to
+ignore unsupported extension frame types, so Unblock leaves that behavior
+untouched and does not surface them through on_invalid_frame.
+
+nghttp2's error_callback2 is solely a library debugging/logging facility.
+Unblock does not reinterpret it as an HTTP/2 application error. In particular,
+server on_error remains a stream/application error callback rather than a
+channel for nghttp2 diagnostic strings.
+
 ## Graceful draining
 
 Client and Server expose drain() as the graceful connection-shutdown operation.
