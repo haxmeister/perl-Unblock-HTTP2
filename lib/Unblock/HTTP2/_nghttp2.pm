@@ -40,20 +40,33 @@ sub _callbacks {
     return $callbacks;
 }
 
+sub _max_header_list_size {
+    my ($operation, $args) = @_;
+    my $limit = exists($args->{max_header_list_size})
+        ? delete($args->{max_header_list_size})
+        : 65_536;
+    croak "$operation: max_header_list_size must be a positive integer"
+        unless defined($limit) && !ref($limit)
+            && "$limit" =~ /A[0-9]+z/ && $limit > 0;
+    return 0 + $limit;
+}
+
 sub new_client {
     my ($class, %args) = @_;
     my $callbacks = _callbacks(delete($args{callbacks}));
+    my $max_header_list_size = _max_header_list_size('new_client()', %args);
     croak 'new_client(): unknown options: ' . join(', ', sort keys %args)
         if %args;
-    return $class->_new_client_xs($callbacks);
+    return $class->_new_client_xs($callbacks, $max_header_list_size);
 }
 
 sub new_server {
     my ($class, %args) = @_;
     my $callbacks = _callbacks(delete($args{callbacks}));
+    my $max_header_list_size = _max_header_list_size('new_server()', %args);
     croak 'new_server(): unknown options: ' . join(', ', sort keys %args)
         if %args;
-    return $class->_new_server_xs($callbacks);
+    return $class->_new_server_xs($callbacks, $max_header_list_size);
 }
 
 sub send_connection_preface {
