@@ -92,6 +92,7 @@ sub new {
     $session->send_connection_preface(
         max_concurrent_streams => 100,
         max_header_list_size   => $self->{max_header_list_size},
+        enable_push            => 0,
     );
 
     return $self;
@@ -99,6 +100,18 @@ sub new {
 
 sub draining {
     return $_[0]{draining} ? 1 : 0;
+}
+
+sub drain {
+    my ($self) = @_;
+    return $self if $self->is_closed || $self->{draining};
+
+    $self->{session}->submit_goaway(
+        last_stream_id => 0,
+        error_code     => 0,
+    );
+    $self->{draining} = 1;
+    return $self;
 }
 
 sub can_open_stream {
