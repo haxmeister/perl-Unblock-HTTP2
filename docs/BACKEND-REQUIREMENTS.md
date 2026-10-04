@@ -26,6 +26,7 @@ The private binding exposes only the pieces Unblock needs:
 - local SETTINGS submission
 - effective remote SETTINGS queries
 - received SETTINGS identifier/value details and ACK flags
+- RFC 9218 PRIORITY_UPDATE submission and built-in receive processing
 - request and response submission
 - generic HEADERS submission
 - deferred DATA providers and resume
@@ -75,6 +76,20 @@ Generic non-final HEADERS submission is available through the private binding.
 The public server API is Stream->inform($response). It accepts a Uniform
 informational Response and leaves the stream available for later informational
 responses and the final Stream->respond($response).
+
+## Extensible priorities
+
+Alien::nghttp2 0.003 requires libnghttp2 1.57.0 or newer, which includes the
+RFC 9218 implementation added in nghttp2 1.48.0.
+
+The server session enables NGHTTP2_PRIORITY_UPDATE as a built-in received
+extension type. Received extension payloads expose the prioritized stream id
+and complete Priority field value to the Perl layer while nghttp2 retains its
+normal parsing and scheduling state.
+
+The client submits updates with nghttp2_submit_priority_update. The public
+layer sends them only after the peer's effective
+SETTINGS_NO_RFC7540_PRIORITIES value is 1.
 
 ## PING
 
