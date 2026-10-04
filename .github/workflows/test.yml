@@ -58,7 +58,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cpanm --notest Net::HTTP2::nghttp2
+          cpanm -v --notest Net::HTTP2::nghttp2
           cpanm --notest Uniform::HTTP@0.04
           cpanm --notest --installdeps .
 
