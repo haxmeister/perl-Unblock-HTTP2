@@ -23,27 +23,47 @@ is $request->method, 'POST', 'method maps from :method';
 is $request->target, '/items', 'target maps from :path';
 is $request->scheme, 'https', 'scheme maps from :scheme';
 is $request->authority, 'example.test', 'authority maps from :authority';
-is $request->version, '2', 'request reports HTTP version 2';
-ok !$request->is_mutable, 'received request metadata is committed';
+is $request->protocol, undef, 'ordinary request has no protocol metadata';
+is $request->version, '2', 'received request reports HTTP version 2';
+ok !$request->initial_is_mutable,
+    'received initial request metadata is frozen';
+ok $request->trailers_are_mutable,
+    'received open request can still acquire trailers';
+ok $request->is_mutable,
+    'open received request remains partially mutable';
 ok !$request->is_complete, 'open request body is incomplete';
 is_deeply $request->header_values('x-test'), [ 'one', 'two' ],
     'normal duplicate fields remain lossless';
 
-$request->mark_complete;
-ok $request->is_complete, 'message completeness can advance after commit';
+Unblock::HTTP2::_Headers->apply_trailers(
+    $request,
+    [
+        [ 'x-checksum', 'abc' ],
+        [ 'x-checksum', 'def' ],
+    ],
+);
+is_deeply $request->trailer_values('x-checksum'), [ 'abc', 'def' ],
+    'incoming trailers remain ordered and duplicate preserving';
+ok !$request->trailers_are_mutable,
+    'received trailer section freezes after the trailing block';
+
+$request->mark_complete->freeze;
+ok $request->is_complete, 'message completeness advances independently';
+ok !$request->is_mutable, 'completed received message can be fully frozen';
 
 my $outgoing = Uniform::HTTP::Request->new(
     method    => 'GET',
     target    => '/',
     scheme    => 'https',
     authority => 'example.test',
-    version   => '2',
     headers   => [
         [ 'X-Test', 'one' ],
         [ 'x-test', 'two' ],
     ],
 );
 
+is $outgoing->version, undef,
+    'application-created request can remain version neutral';
 is_deeply(
     Unblock::HTTP2::_Headers->request_headers($outgoing),
     [
@@ -54,7 +74,59 @@ is_deeply(
         [ 'x-test',     'one' ],
         [ 'x-test',     'two' ],
     ],
-    'outgoing fields are mapped and normalized for HTTP/2',
+    'version-neutral outgoing fields map to HTTP/2',
+);
+is $outgoing->version, undef,
+    'HTTP/2 mapping does not mutate the application request version';
+
+my $ordinary_connect = Uniform::HTTP::Request->new(
+    method    => 'CONNECT',
+    target    => 'example.test:443',
+    authority => 'example.test:443',
+);
+is_deeply(
+    Unblock::HTTP2::_Headers->request_headers($ordinary_connect),
+    [
+        [ ':method',    'CONNECT' ],
+        [ ':authority', 'example.test:443' ],
+    ],
+    'ordinary CONNECT omits scheme and path',
+);
+
+my $extended = Unblock::HTTP2::_Headers->request_from_headers(
+    [
+        [ ':method',    'CONNECT' ],
+        [ ':protocol',  'websocket' ],
+        [ ':scheme',    'https' ],
+        [ ':authority', 'example.test' ],
+        [ ':path',      '/chat' ],
+    ],
+    end_stream => 0,
+);
+is $extended->protocol, 'websocket',
+    'extended CONNECT maps :protocol';
+is $extended->target, '/chat',
+    'extended CONNECT keeps exact :path as target';
+is $extended->scheme, 'https',
+    'extended CONNECT keeps scheme';
+
+my $outgoing_extended = Uniform::HTTP::Request->new(
+    method    => 'CONNECT',
+    protocol  => 'connect-udp',
+    scheme    => 'https',
+    authority => 'proxy.example',
+    target    => '/.well-known/masque/udp/example.test/443/',
+);
+is_deeply(
+    Unblock::HTTP2::_Headers->request_headers($outgoing_extended),
+    [
+        [ ':method',    'CONNECT' ],
+        [ ':protocol',  'connect-udp' ],
+        [ ':scheme',    'https' ],
+        [ ':authority', 'proxy.example' ],
+        [ ':path',      '/.well-known/masque/udp/example.test/443/' ],
+    ],
+    'generic Extended CONNECT protocol metadata maps to HTTP/2',
 );
 
 my $response = Unblock::HTTP2::_Headers->response_from_headers(
@@ -68,8 +140,25 @@ my $response = Unblock::HTTP2::_Headers->response_from_headers(
 isa_ok $response, 'Uniform::HTTP::Response';
 is $response->status, 204, 'status maps from :status';
 is $response->reason, undef, 'HTTP/2 does not synthesize a reason phrase';
+is $response->version, '2', 'received response reports HTTP version 2';
 ok $response->is_complete, 'END_STREAM response is complete';
-ok !$response->is_mutable, 'received response metadata is committed';
+ok !$response->is_mutable, 'completed received response is fully frozen';
+
+my $with_trailers = Uniform::HTTP::Response->new(
+    status => 200,
+    trailers => [
+        [ 'X-One', 'a' ],
+        [ 'x-one', 'b' ],
+    ],
+);
+is_deeply(
+    Unblock::HTTP2::_Headers->trailer_fields('test trailers', $with_trailers),
+    [
+        [ 'x-one', 'a' ],
+        [ 'x-one', 'b' ],
+    ],
+    'outgoing trailers are lowercased and preserve duplicates',
+);
 
 my $ok = eval {
     Unblock::HTTP2::_Headers->request_from_headers(
@@ -104,5 +193,22 @@ $ok = eval {
 ok !$ok, 'connection-specific fields are rejected';
 like $@, qr/forbids connection-specific field/,
     'connection-specific rejection is explicit';
+
+$ok = eval {
+    Unblock::HTTP2::_Headers->request_from_headers(
+        [
+            [ ':method',    'GET' ],
+            [ ':protocol',  'websocket' ],
+            [ ':scheme',    'https' ],
+            [ ':authority', 'example.test' ],
+            [ ':path',      '/' ],
+        ],
+        end_stream => 1,
+    );
+    1;
+};
+ok !$ok, ':protocol on a non-CONNECT request is rejected';
+like $@, qr/:protocol requires CONNECT/,
+    'non-CONNECT protocol rejection is explicit';
 
 done_testing;
