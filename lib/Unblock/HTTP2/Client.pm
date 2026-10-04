@@ -9,7 +9,7 @@ use parent 'Unblock::HTTP2::_Connection';
 use Unblock::HTTP2::_Headers;
 use Unblock::HTTP2::Stream;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 use constant {
     H2_DATA              => 0,
