@@ -45,7 +45,6 @@ typedef struct {
     nghttp2_session *session;
     uhttp_native_api uniform_api;
     SV *cb_begin_headers;
-    SV *cb_header;
     SV *cb_frame_recv;
     SV *cb_data_chunk_recv;
     SV *cb_stream_close;
@@ -144,7 +143,6 @@ static void
 load_callbacks(pTHX_ unblock_h2_session *ps, HV *callbacks)
 {
     ps->cb_begin_headers = callback_from_hash(aTHX_ callbacks, "on_begin_headers", 16);
-    ps->cb_header = callback_from_hash(aTHX_ callbacks, "on_header", 9);
     ps->cb_frame_recv = callback_from_hash(aTHX_ callbacks, "on_frame_recv", 13);
     ps->cb_data_chunk_recv = callback_from_hash(aTHX_ callbacks, "on_data_chunk_recv", 18);
     ps->cb_stream_close = callback_from_hash(aTHX_ callbacks, "on_stream_close", 15);
@@ -156,7 +154,6 @@ static void
 release_callbacks(pTHX_ unblock_h2_session *ps)
 {
     if (ps->cb_begin_headers) SvREFCNT_dec(ps->cb_begin_headers);
-    if (ps->cb_header) SvREFCNT_dec(ps->cb_header);
     if (ps->cb_frame_recv) SvREFCNT_dec(ps->cb_frame_recv);
     if (ps->cb_data_chunk_recv) SvREFCNT_dec(ps->cb_data_chunk_recv);
     if (ps->cb_stream_close) SvREFCNT_dec(ps->cb_stream_close);
@@ -165,7 +162,6 @@ release_callbacks(pTHX_ unblock_h2_session *ps)
     if (ps->callback_error) SvREFCNT_dec(ps->callback_error);
 
     ps->cb_begin_headers = NULL;
-    ps->cb_header = NULL;
     ps->cb_frame_recv = NULL;
     ps->cb_data_chunk_recv = NULL;
     ps->cb_stream_close = NULL;
