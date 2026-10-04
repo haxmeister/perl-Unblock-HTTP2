@@ -22,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libnghttp2-dev pkg-config
           cpanm --notest Alien::nghttp2
-          cpanm --notest Uniform::HTTP@0.05
+          cpanm --notest Uniform::HTTP@0.06
 
       - name: Build FastPath branch
         shell: bash
@@ -34,7 +34,7 @@ jobs:
       - name: Check out released baseline
         uses: actions/checkout@v4
         with:
-          ref: 681b434e9af4335a72b052ee9ad18c33260655d5
+          ref: 7f8df4a38d4d5330713c2da26d4482e81e13d25d
           path: baseline
 
       - name: Build released baseline
@@ -52,14 +52,14 @@ jobs:
 
           run_baseline() {
             BENCH_LABEL=baseline \
-            BENCH_EXPECT_PATH=portable \
+            BENCH_EXPECT_PATH=perl-fastpath \
             PERL5LIB="$PWD/baseline/blib/lib:$PWD/baseline/blib/arch:$PERL5LIB" \
               perl xt/benchmark-uniform-fastpath.pl | tee -a benchmark-results.txt
           }
 
           run_fastpath() {
-            BENCH_LABEL=fastpath \
-            BENCH_EXPECT_PATH=fastpath \
+            BENCH_LABEL=native \
+            BENCH_EXPECT_PATH=native \
             PERL5LIB="$PWD/blib/lib:$PWD/blib/arch:$PERL5LIB" \
               perl xt/benchmark-uniform-fastpath.pl | tee -a benchmark-results.txt
           }
@@ -115,11 +115,11 @@ jobs:
 
           for mode in ("submit", "loopback"):
               base = medians[("baseline", mode)]
-              fast = medians[("fastpath", mode)]
-              change = (fast / base - 1.0) * 100.0
-              ratio = fast / base
+              native = medians[("native", mode)]
+              change = (native / base - 1.0) * 100.0
+              ratio = native / base
               print(
                   f"CHANGE {mode}: {change:+.2f}% "
-                  f"({ratio:.3f}x, {base:,.1f}/s -> {fast:,.1f}/s)"
+                  f"({ratio:.3f}x, {base:,.1f}/s -> {native:,.1f}/s)"
               )
           PY

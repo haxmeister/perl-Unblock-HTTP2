@@ -226,10 +226,12 @@ Unblock::HTTP2 uses a small private XS binding named
 That binding is not public API. It does not own Uniform::HTTP objects or know
 about event loops.
 
-For exact canonical Uniform::HTTP messages, the binding can consume the
-Uniform::HTTP 0.05 FastPath ABI directly. This avoids rebuilding headers in
-Perl before handing them to libnghttp2. Adapters and subclasses continue
-through the portable Perl message path.
+For exact canonical Uniform::HTTP messages, the binding uses the
+Uniform::HTTP 0.06 native C ABI. Outgoing objects are inspected in XS without
+building a Perl FastPath view. Received initial header blocks stay native until
+HTTP/2 validation is complete, then XS constructs the final canonical Uniform
+object directly. Adapters and subclasses continue through the portable Perl
+message path.
 
 The Perl layer still owns the public API, portable message mapping, transaction
 objects, and transport boundary.

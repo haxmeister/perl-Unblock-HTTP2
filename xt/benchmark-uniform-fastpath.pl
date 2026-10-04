@@ -41,37 +41,34 @@ sub submit_batch {
     $session->send_connection_preface;
     $session->mem_send;
 
-    my $native_fast = $session->can('_submit_request_uniform_xs') ? 1 : 0;
-
-    if ($expected_path eq 'fastpath' && !$native_fast) {
-        die "expected FastPath implementation but portable module was loaded from "
-            . ($INC{'Unblock/HTTP2/_nghttp2.pm'} || 'unknown path');
-    }
-    if ($expected_path eq 'portable' && $native_fast) {
-        die "expected portable baseline but FastPath module was loaded from "
-            . ($INC{'Unblock/HTTP2/_nghttp2.pm'} || 'unknown path');
-    }
+    my $path = $expected_path || 'native';
 
     for my $index (1 .. $iterations) {
-        if ($native_fast) {
+        if ($path eq 'native') {
+            $session->_submit_request_uniform_xs($request, undef);
+        }
+        elsif ($path eq 'perl-fastpath') {
             my $view = Uniform::HTTP::FastPath::view($request);
             $session->_submit_request_uniform_xs($view, undef);
         }
-        else {
+        elsif ($path eq 'portable') {
             my $block = Unblock::HTTP2::_Headers->request_headers($request);
             $session->_submit_request_xs($block, undef);
+        }
+        else {
+            die "unknown benchmark path '$path'";
         }
 
         $session->mem_send if ($index & 127) == 0;
     }
 
     $session->mem_send;
-    return $native_fast;
+    return $path;
 }
 
 submit_batch($warmup_iterations);
 my $submit_start = time;
-my $native_fast = submit_batch($submit_iterations);
+my $measured_path = submit_batch($submit_iterations);
 my $submit_seconds = time - $submit_start;
 my $submit_rate = $submit_iterations / $submit_seconds;
 
@@ -183,14 +180,14 @@ printf "INFO label=%s module=%s\n",
 
 printf "RESULT label=%s path=%s mode=submit iterations=%d seconds=%.6f rate=%.3f\n",
     $label,
-    $native_fast ? 'fastpath' : 'portable',
+    $measured_path,
     $submit_iterations,
     $submit_seconds,
     $submit_rate;
 
 printf "RESULT label=%s path=%s mode=loopback iterations=%d seconds=%.6f rate=%.3f\n",
     $label,
-    $native_fast ? 'fastpath' : 'portable',
+    $measured_path,
     $loopback_iterations,
     $loopback_seconds,
     $loopback_rate;

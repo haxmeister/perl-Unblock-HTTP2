@@ -23,7 +23,7 @@ The Perl layer needs:
 
 - client and server session creation
 - memory input and output
-- frame, header, DATA, invalid-frame, and stream-close callbacks
+- frame, native header-block collection, DATA, invalid-frame, and stream-close callbacks
 - request and response submission
 - generic HEADERS submission
 - DATA providers and resume
@@ -36,11 +36,14 @@ The Perl layer needs:
 - stream half-close queries
 - separate connection and stream receive-credit release
 
-The binding returns protocol facts. It does not create Uniform::HTTP objects or
-make application policy decisions.
+The binding returns protocol facts and owns the native HTTP/2 header boundary.
+It does not make application policy decisions.
 
-For exact canonical Uniform::HTTP messages, it may consume a versioned
-Uniform::HTTP FastPath view. The portable Perl path remains required for
+For exact canonical Uniform::HTTP messages, it uses the Uniform::HTTP 0.06
+native C ABI. Outgoing objects are inspected directly in XS. Received initial
+header blocks are validated in the binding and constructed directly as
+canonical Uniform objects from native byte spans. Trailers are handed to Perl
+once per completed block. The portable Perl path remains required for
 subclasses and adapters.
 
 ## SETTINGS

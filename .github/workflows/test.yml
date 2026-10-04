@@ -51,15 +51,17 @@ jobs:
         shell: bash
         run: |
           cpanm --notest Alien::nghttp2
-          cpanm --notest Uniform::HTTP@0.05
+          cpanm --notest Uniform::HTTP@0.06
           cpanm --notest --installdeps .
 
       - name: Install dependencies on Windows
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           cpanm -v --notest Alien::nghttp2
-          cpanm --notest Uniform::HTTP@0.05
+          cpanm --notest Uniform::HTTP@0.06
           cpanm --notest --installdeps .
 
       - name: Build and test

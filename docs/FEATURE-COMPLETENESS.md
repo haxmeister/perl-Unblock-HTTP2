@@ -29,10 +29,11 @@ The 0.03 core includes:
 - invalid-frame observation
 - safe handling of unknown extension frame types
 - fatal session failure reporting
-- Uniform::HTTP 0.05 FastPath support for canonical messages
+- Uniform::HTTP 0.06 native C path for canonical messages
 
-HTTP messages use Uniform::HTTP 0.05. Canonical Uniform messages use the
-FastPath ABI. Adapters and subclasses keep the portable message contract.
+HTTP messages use Uniform::HTTP 0.06. Exact canonical Uniform messages use the
+native C ABI for direct inspection and validated construction. Adapters and
+subclasses keep the portable message contract.
 
 ## Intentionally not included
 

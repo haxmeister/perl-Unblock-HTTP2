@@ -40,20 +40,33 @@ sub _callbacks {
     return $callbacks;
 }
 
+sub _max_header_list_size {
+    my ($operation, $args) = @_;
+    my $limit = exists($args->{max_header_list_size})
+        ? delete($args->{max_header_list_size})
+        : 65_536;
+    croak "$operation: max_header_list_size must be a positive integer"
+        unless defined($limit) && !ref($limit)
+            && "$limit" =~ /\A[0-9]+\z/ && $limit > 0;
+    return 0 + $limit;
+}
+
 sub new_client {
     my ($class, %args) = @_;
     my $callbacks = _callbacks(delete($args{callbacks}));
+    my $max_header_list_size = _max_header_list_size('new_client()', \%args);
     croak 'new_client(): unknown options: ' . join(', ', sort keys %args)
         if %args;
-    return $class->_new_client_xs($callbacks);
+    return $class->_new_client_xs($callbacks, $max_header_list_size);
 }
 
 sub new_server {
     my ($class, %args) = @_;
     my $callbacks = _callbacks(delete($args{callbacks}));
+    my $max_header_list_size = _max_header_list_size('new_server()', \%args);
     croak 'new_server(): unknown options: ' . join(', ', sort keys %args)
         if %args;
-    return $class->_new_server_xs($callbacks);
+    return $class->_new_server_xs($callbacks, $max_header_list_size);
 }
 
 sub send_connection_preface {
@@ -87,13 +100,13 @@ sub _submit_request_xs {
 }
 
 sub _submit_request_uniform_xs {
-    my ($self, $view, $body) = @_;
+    my ($self, $message, $body) = @_;
     my $provider = _body_provider($body);
-    return $self->_submit_request_uniform_native($view, $provider);
+    return $self->_submit_request_uniform_native($message, $provider);
 }
 
 sub submit_response_uniform {
-    my ($self, $stream_id, $view, %args) = @_;
+    my ($self, $stream_id, $message, %args) = @_;
     my $body = delete($args{body});
     my $data_callback = delete($args{data_callback});
     delete $args{callback_data};
@@ -107,22 +120,22 @@ sub submit_response_uniform {
 
     return $provider
         ? $self->_submit_response_uniform_streaming_native(
-            $stream_id, $view, $provider,
+            $stream_id, $message, $provider,
         )
         : $self->_submit_response_uniform_no_body_native(
-            $stream_id, $view,
+            $stream_id, $message,
         );
 }
 
 sub submit_response_headers_uniform {
-    my ($self, $stream_id, $view, %args) = @_;
+    my ($self, $stream_id, $message, %args) = @_;
     my $end_stream = delete($args{end_stream}) || 0;
     croak 'submit_response_headers_uniform(): unknown options: '
         . join(', ', sort keys %args)
         if %args;
 
     return $self->_submit_response_headers_uniform_native(
-        $stream_id, $view, $end_stream ? 1 : 0,
+        $stream_id, $message, $end_stream ? 1 : 0,
     );
 }
 

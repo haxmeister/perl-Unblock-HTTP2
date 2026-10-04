@@ -2,28 +2,35 @@
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
+#include "uniform_http_fastpath.h"
 
 #include <nghttp2/nghttp2.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define UHFP_ABI_VERSION 1
-#define UHFP_KIND_REQUEST 1
-#define UHFP_KIND_RESPONSE 2
-#define UHFP_SLOT_ABI 0
-#define UHFP_SLOT_KIND 1
-#define UHFP_SLOT_VERSION 3
-#define UHFP_SLOT_METHOD 4
-#define UHFP_SLOT_TARGET 5
-#define UHFP_SLOT_SCHEME 6
-#define UHFP_SLOT_AUTHORITY 7
-#define UHFP_SLOT_PROTOCOL 8
-#define UHFP_SLOT_STATUS 9
-#define UHFP_SLOT_HEADERS 11
-#define UHFP_SLOT_COUNT 14
-
 typedef struct unblock_h2_provider unblock_h2_provider;
+typedef struct unblock_h2_header_block unblock_h2_header_block;
+
+typedef struct {
+    char *name;
+    size_t namelen;
+    char *value;
+    size_t valuelen;
+} unblock_h2_header_field;
+
+struct unblock_h2_header_block {
+    unblock_h2_header_block *next;
+    int32_t stream_id;
+    int category;
+    uint8_t flags;
+    size_t list_size;
+    size_t count;
+    size_t capacity;
+    unblock_h2_header_field *fields;
+    const char *error;
+    uint32_t error_code;
+};
 
 struct unblock_h2_provider {
     unblock_h2_provider *next;
@@ -36,8 +43,8 @@ struct unblock_h2_provider {
 
 typedef struct {
     nghttp2_session *session;
+    uhttp_native_api uniform_api;
     SV *cb_begin_headers;
-    SV *cb_header;
     SV *cb_frame_recv;
     SV *cb_data_chunk_recv;
     SV *cb_stream_close;
@@ -46,6 +53,9 @@ typedef struct {
     SV *callback_error;
     unblock_h2_provider *providers;
     unblock_h2_provider *pending_free;
+    unblock_h2_header_block *header_blocks;
+    size_t max_header_list_size;
+    int server;
     int in_session_call;
 } unblock_h2_session;
 
@@ -133,7 +143,6 @@ static void
 load_callbacks(pTHX_ unblock_h2_session *ps, HV *callbacks)
 {
     ps->cb_begin_headers = callback_from_hash(aTHX_ callbacks, "on_begin_headers", 16);
-    ps->cb_header = callback_from_hash(aTHX_ callbacks, "on_header", 9);
     ps->cb_frame_recv = callback_from_hash(aTHX_ callbacks, "on_frame_recv", 13);
     ps->cb_data_chunk_recv = callback_from_hash(aTHX_ callbacks, "on_data_chunk_recv", 18);
     ps->cb_stream_close = callback_from_hash(aTHX_ callbacks, "on_stream_close", 15);
@@ -145,7 +154,6 @@ static void
 release_callbacks(pTHX_ unblock_h2_session *ps)
 {
     if (ps->cb_begin_headers) SvREFCNT_dec(ps->cb_begin_headers);
-    if (ps->cb_header) SvREFCNT_dec(ps->cb_header);
     if (ps->cb_frame_recv) SvREFCNT_dec(ps->cb_frame_recv);
     if (ps->cb_data_chunk_recv) SvREFCNT_dec(ps->cb_data_chunk_recv);
     if (ps->cb_stream_close) SvREFCNT_dec(ps->cb_stream_close);
@@ -154,7 +162,6 @@ release_callbacks(pTHX_ unblock_h2_session *ps)
     if (ps->callback_error) SvREFCNT_dec(ps->callback_error);
 
     ps->cb_begin_headers = NULL;
-    ps->cb_header = NULL;
     ps->cb_frame_recv = NULL;
     ps->cb_data_chunk_recv = NULL;
     ps->cb_stream_close = NULL;
@@ -235,6 +242,165 @@ add_provider(pTHX_ unblock_h2_session *ps, unblock_h2_provider *provider)
     ps->providers = provider;
 }
 
+static void
+free_header_block(pTHX_ unblock_h2_header_block *block)
+{
+    size_t i;
+
+    if (!block) {
+        return;
+    }
+
+    for (i = 0; i < block->count; i++) {
+        free(block->fields[i].name);
+        free(block->fields[i].value);
+    }
+    free(block->fields);
+    free(block);
+}
+
+static unblock_h2_header_block *
+find_header_block(unblock_h2_session *ps, int32_t stream_id)
+{
+    unblock_h2_header_block *block = ps->header_blocks;
+
+    while (block) {
+        if (block->stream_id == stream_id) {
+            return block;
+        }
+        block = block->next;
+    }
+    return NULL;
+}
+
+static unblock_h2_header_block *
+take_header_block(unblock_h2_session *ps, int32_t stream_id)
+{
+    unblock_h2_header_block **link = &ps->header_blocks;
+
+    while (*link) {
+        unblock_h2_header_block *block = *link;
+        if (block->stream_id == stream_id) {
+            *link = block->next;
+            block->next = NULL;
+            return block;
+        }
+        link = &block->next;
+    }
+    return NULL;
+}
+
+static void
+remove_header_block(pTHX_ unblock_h2_session *ps, int32_t stream_id)
+{
+    free_header_block(aTHX_ take_header_block(ps, stream_id));
+}
+
+static void
+free_header_blocks(pTHX_ unblock_h2_session *ps)
+{
+    unblock_h2_header_block *block = ps->header_blocks;
+
+    ps->header_blocks = NULL;
+    while (block) {
+        unblock_h2_header_block *next = block->next;
+        free_header_block(aTHX_ block);
+        block = next;
+    }
+}
+
+static int
+start_header_block(pTHX_ unblock_h2_session *ps, const nghttp2_frame *frame)
+{
+    unblock_h2_header_block *block;
+
+    remove_header_block(aTHX_ ps, frame->hd.stream_id);
+
+    block = (unblock_h2_header_block *)calloc(1, sizeof(*block));
+    if (!block) {
+        return 0;
+    }
+
+    block->stream_id = frame->hd.stream_id;
+    block->category = frame->headers.cat;
+    block->flags = frame->hd.flags;
+    block->next = ps->header_blocks;
+    ps->header_blocks = block;
+    return 1;
+}
+
+static int
+append_header_field(pTHX_ unblock_h2_session *ps,
+                    unblock_h2_header_block *block,
+                    const uint8_t *name, size_t namelen,
+                    const uint8_t *value, size_t valuelen)
+{
+    unblock_h2_header_field *fields;
+    unblock_h2_header_field *field;
+    size_t new_size;
+    size_t capacity;
+
+    if (!block || block->error) {
+        return 1;
+    }
+
+    if (namelen > (size_t)-1 - valuelen - 32
+        || block->list_size > (size_t)-1 - namelen - valuelen - 32) {
+        block->error = "HTTP/2 header list size overflow";
+        block->error_code = NGHTTP2_ENHANCE_YOUR_CALM;
+        return 1;
+    }
+
+    new_size = block->list_size + namelen + valuelen + 32;
+    if (new_size > ps->max_header_list_size) {
+        block->error = ps->server
+            ? "HTTP/2 request header list exceeds configured limit"
+            : "HTTP/2 response header list exceeds configured limit";
+        block->error_code = NGHTTP2_ENHANCE_YOUR_CALM;
+        return 1;
+    }
+
+    if (block->count == block->capacity) {
+        capacity = block->capacity ? block->capacity * 2 : 8;
+        if (capacity < block->capacity
+            || capacity > (size_t)-1 / sizeof(*fields)) {
+            return 0;
+        }
+        fields = (unblock_h2_header_field *)realloc(
+            block->fields, capacity * sizeof(*fields));
+        if (!fields) {
+            return 0;
+        }
+        memset(fields + block->capacity, 0,
+            (capacity - block->capacity) * sizeof(*fields));
+        block->fields = fields;
+        block->capacity = capacity;
+    }
+
+    field = &block->fields[block->count];
+    field->name = (char *)malloc(namelen ? namelen : 1);
+    field->value = (char *)malloc(valuelen ? valuelen : 1);
+    if (!field->name || !field->value) {
+        free(field->name);
+        free(field->value);
+        field->name = NULL;
+        field->value = NULL;
+        return 0;
+    }
+
+    if (namelen) {
+        memcpy(field->name, name, namelen);
+    }
+    if (valuelen) {
+        memcpy(field->value, value, valuelen);
+    }
+    field->namelen = namelen;
+    field->valuelen = valuelen;
+    block->count++;
+    block->list_size = new_size;
+    return 1;
+}
+
 static nghttp2_nv *
 headers_to_nva(pTHX_ AV *headers, size_t *count_out)
 {
@@ -295,58 +461,26 @@ headers_to_nva(pTHX_ AV *headers, size_t *count_out)
 }
 
 
-static SV *
-uniform_fast_slot(pTHX_ AV *view, I32 index)
+static void
+validate_uniform_native_view(pTHX_ unblock_h2_session *ps, SV *message,
+                             U32 expected_kind, uhttp_native_view *view)
 {
-    SV **svp = av_fetch(view, index, 0);
-
-    if (!svp || !SvOK(*svp)) {
-        return NULL;
-    }
-    return *svp;
-}
-
-static AV *
-validate_uniform_fast_view(pTHX_ AV *view, IV expected_kind)
-{
-    SV *abi_sv;
-    SV *kind_sv;
-    SV *version_sv;
-    SV *headers_sv;
     STRLEN version_len;
     const char *version;
 
-    if (av_len(view) != UHFP_SLOT_COUNT - 1) {
-        croak("Uniform::HTTP FastPath view has the wrong number of slots");
+    if (!uhttp_native_inspect(aTHX_ &ps->uniform_api, message, view)) {
+        croak("Uniform::HTTP native path requires an exact canonical message");
+    }
+    if (view->kind != expected_kind) {
+        croak("Uniform::HTTP native path has the wrong message kind");
     }
 
-    abi_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_ABI);
-    kind_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_KIND);
-    if (!abi_sv || SvROK(abi_sv) || SvIV(abi_sv) != UHFP_ABI_VERSION) {
-        croak("unsupported Uniform::HTTP FastPath ABI");
-    }
-    if (!kind_sv || SvROK(kind_sv) || SvIV(kind_sv) != expected_kind) {
-        croak("Uniform::HTTP FastPath view has the wrong message kind");
-    }
-
-    version_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_VERSION);
-    if (version_sv) {
-        if (SvROK(version_sv)) {
-            croak("Uniform::HTTP FastPath version must be a plain scalar");
-        }
-        version = SvPVbyte(version_sv, version_len);
+    if (SvOK(view->version)) {
+        version = SvPVbyte(view->version, version_len);
         if (version_len != 1 || version[0] != '2') {
             croak("explicit HTTP version must be 2");
         }
     }
-
-    headers_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_HEADERS);
-    if (!headers_sv || !SvROK(headers_sv)
-        || SvTYPE(SvRV(headers_sv)) != SVt_PVAV) {
-        croak("Uniform::HTTP FastPath headers must be an array reference");
-    }
-
-    return (AV *)SvRV(headers_sv);
 }
 
 static int
@@ -397,7 +531,7 @@ http_token_char(unsigned char ch)
 }
 
 static void
-validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
+validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, Size_t index)
 {
     STRLEN name_len;
     STRLEN value_len;
@@ -405,28 +539,31 @@ validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
     const char *value;
     size_t i;
 
-    if (!name_sv || !value_sv || SvROK(name_sv) || SvROK(value_sv)) {
-        croak("header %ld name and value must be defined scalars", (long)index);
+    if (!name_sv || !value_sv || !SvOK(name_sv) || !SvOK(value_sv)
+        || SvROK(name_sv) || SvROK(value_sv)) {
+        croak("header %lu name and value must be defined scalars",
+            (unsigned long)index);
     }
 
     name = SvPVbyte(name_sv, name_len);
     value = SvPVbyte(value_sv, value_len);
 
     if (name_len == 0) {
-        croak("header %ld name must not be empty", (long)index);
+        croak("header %lu name must not be empty", (unsigned long)index);
     }
 
     for (i = 0; i < (size_t)name_len; i++) {
         if (!http_token_char((unsigned char)name[i])) {
-            croak("header %ld name must be an HTTP token", (long)index);
+            croak("header %lu name must be an HTTP token",
+                (unsigned long)index);
         }
     }
 
     for (i = 0; i < (size_t)value_len; i++) {
         unsigned char ch = (unsigned char)value[i];
         if (ch <= 0x08 || (ch >= 0x0a && ch <= 0x1f) || ch == 0x7f) {
-            croak("header %ld value contains a prohibited control byte",
-                (long)index);
+            croak("header %lu value contains a prohibited control byte",
+                (unsigned long)index);
         }
     }
 
@@ -435,7 +572,8 @@ validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
         || ascii_equal_ci(name, (size_t)name_len, "proxy-connection")
         || ascii_equal_ci(name, (size_t)name_len, "transfer-encoding")
         || ascii_equal_ci(name, (size_t)name_len, "upgrade")) {
-        croak("HTTP/2 forbids connection-specific header '%s'", name);
+        croak("HTTP/2 forbids connection-specific header '%.*s'",
+            (int)name_len, name);
     }
 
     if (ascii_equal_ci(name, (size_t)name_len, "te")
@@ -445,47 +583,33 @@ validate_h2_normal_field(pTHX_ SV *name_sv, SV *value_sv, I32 index)
 }
 
 static size_t
-measure_normal_headers(pTHX_ AV *headers, size_t *name_bytes_out)
+measure_native_headers(pTHX_ const uhttp_native_section *headers,
+                       size_t *name_bytes_out)
 {
-    I32 last = av_len(headers);
-    I32 i;
-    size_t count = last < 0 ? 0 : (size_t)last + 1;
+    Size_t count = uhttp_native_field_count(aTHX_ headers);
+    Size_t i;
     size_t name_bytes = 0;
 
-    for (i = 0; i <= last; i++) {
-        SV **pair_sv = av_fetch(headers, i, 0);
-        AV *pair;
-        SV **name_sv;
-        SV **value_sv;
+    for (i = 0; i < count; i++) {
+        SV *name_sv;
+        SV *value_sv;
         STRLEN name_len;
 
-        if (!pair_sv || !SvROK(*pair_sv)
-            || SvTYPE(SvRV(*pair_sv)) != SVt_PVAV) {
-            croak("header %ld must be a two-element array reference", (long)i);
+        if (!uhttp_native_field_at(aTHX_ headers, i, &name_sv, &value_sv)) {
+            croak("Uniform::HTTP native header index is out of range");
         }
-
-        pair = (AV *)SvRV(*pair_sv);
-        if (av_len(pair) != 1) {
-            croak("header %ld must be a two-element array reference", (long)i);
-        }
-
-        name_sv = av_fetch(pair, 0, 0);
-        value_sv = av_fetch(pair, 1, 0);
-        if (!name_sv || !value_sv || !SvOK(*name_sv) || !SvOK(*value_sv)) {
-            croak("header %ld name and value must be defined scalars", (long)i);
-        }
-
-        validate_h2_normal_field(aTHX_ *name_sv, *value_sv, i);
-        (void)SvPVbyte(*name_sv, name_len);
+        validate_h2_normal_field(aTHX_ name_sv, value_sv, i);
+        (void)SvPVbyte(name_sv, name_len);
         name_bytes += (size_t)name_len;
     }
 
     *name_bytes_out = name_bytes;
-    return count;
+    return (size_t)count;
 }
 
 static void
-set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len, SV *value_sv)
+set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len,
+               SV *value_sv)
 {
     STRLEN value_len;
     const char *value = SvPVbyte(value_sv, value_len);
@@ -498,24 +622,29 @@ set_nv_from_sv(pTHX_ nghttp2_nv *nv, const char *name, size_t name_len, SV *valu
 }
 
 static void
-append_normal_headers(pTHX_ nghttp2_nv *nva, size_t start,
-                      AV *headers, char *name_buffer)
+append_native_headers(pTHX_ nghttp2_nv *nva, size_t start,
+                      const uhttp_native_section *headers, char *name_buffer)
 {
-    I32 last = av_len(headers);
-    I32 i;
+    Size_t count = uhttp_native_field_count(aTHX_ headers);
+    Size_t i;
     size_t out = start;
     char *cursor = name_buffer;
 
-    for (i = 0; i <= last; i++, out++) {
-        SV **pair_sv = av_fetch(headers, i, 0);
-        AV *pair = (AV *)SvRV(*pair_sv);
-        SV **name_sv = av_fetch(pair, 0, 0);
-        SV **value_sv = av_fetch(pair, 1, 0);
+    for (i = 0; i < count; i++, out++) {
+        SV *name_sv;
+        SV *value_sv;
         STRLEN name_len;
         STRLEN value_len;
-        const char *name = SvPVbyte(*name_sv, name_len);
-        const char *value = SvPVbyte(*value_sv, value_len);
+        const char *name;
+        const char *value;
         size_t j;
+
+        if (!uhttp_native_field_at(aTHX_ headers, i, &name_sv, &value_sv)) {
+            croak("Uniform::HTTP native header index is out of range");
+        }
+
+        name = SvPVbyte(name_sv, name_len);
+        value = SvPVbyte(value_sv, value_len);
 
         for (j = 0; j < (size_t)name_len; j++) {
             unsigned char ch = (unsigned char)name[j];
@@ -533,14 +662,15 @@ append_normal_headers(pTHX_ nghttp2_nv *nva, size_t start,
 }
 
 static nghttp2_nv *
-uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
+uniform_request_to_nva(pTHX_ unblock_h2_session *ps, SV *message,
+                       size_t *count_out)
 {
-    AV *headers = validate_uniform_fast_view(aTHX_ view, UHFP_KIND_REQUEST);
-    SV *method_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_METHOD);
-    SV *target_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_TARGET);
-    SV *scheme_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_SCHEME);
-    SV *authority_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_AUTHORITY);
-    SV *protocol_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_PROTOCOL);
+    uhttp_native_view view;
+    SV *method_sv;
+    SV *target_sv;
+    SV *scheme_sv;
+    SV *authority_sv;
+    SV *protocol_sv;
     STRLEN method_len;
     STRLEN target_len;
     STRLEN scheme_len = 0;
@@ -559,36 +689,31 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
     char *name_buffer;
     size_t out = 0;
 
-    if (!method_sv || !target_sv || SvROK(method_sv) || SvROK(target_sv)) {
-        croak("Uniform::HTTP FastPath request requires method and target");
-    }
+    validate_uniform_native_view(
+        aTHX_ ps, message, UHTTP_KIND_REQUEST, &view);
+
+    method_sv = view.method;
+    target_sv = view.target;
+    scheme_sv = view.scheme;
+    authority_sv = view.authority;
+    protocol_sv = view.protocol;
 
     method = SvPVbyte(method_sv, method_len);
     target = SvPVbyte(target_sv, target_len);
-    if (authority_sv && !SvROK(authority_sv)) {
+    if (SvOK(authority_sv)) {
         authority = SvPVbyte(authority_sv, authority_len);
     }
-    else if (authority_sv) {
-        croak("Uniform::HTTP FastPath request authority must be a plain scalar");
-    }
-    if (scheme_sv && !SvROK(scheme_sv)) {
+    if (SvOK(scheme_sv)) {
         scheme = SvPVbyte(scheme_sv, scheme_len);
     }
-    else if (scheme_sv) {
-        croak("Uniform::HTTP FastPath request scheme must be a plain scalar");
-    }
-    if (protocol_sv && !SvROK(protocol_sv)) {
+    if (SvOK(protocol_sv)) {
         protocol = SvPVbyte(protocol_sv, protocol_len);
-    }
-    else if (protocol_sv) {
-        croak("Uniform::HTTP FastPath request protocol must be a plain scalar");
     }
 
     if (ascii_equal_ci(method, (size_t)method_len, "CONNECT")) {
         if (!authority || authority_len == 0) {
             croak("request_headers(): CONNECT requires authority");
         }
-
         if (protocol) {
             if (protocol_len == 0) {
                 croak("request_headers(): extended CONNECT requires nonempty protocol");
@@ -628,17 +753,16 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
         pseudo_count = 4;
     }
 
-    normal_count = measure_normal_headers(aTHX_ headers, &normal_name_bytes);
+    normal_count = measure_native_headers(
+        aTHX_ &view.headers, &normal_name_bytes);
     count = pseudo_count + normal_count;
-    nva = (nghttp2_nv *)calloc(
-        1, count * sizeof(*nva) + normal_name_bytes);
+    nva = (nghttp2_nv *)calloc(1, count * sizeof(*nva) + normal_name_bytes);
     if (!nva) {
-        croak("unable to allocate HTTP/2 Uniform FastPath header block");
+        croak("unable to allocate HTTP/2 Uniform native header block");
     }
     name_buffer = (char *)(nva + count);
 
     set_nv_from_sv(aTHX_ &nva[out++], ":method", 7, method_sv);
-
     if (ascii_equal_ci(method, (size_t)method_len, "CONNECT")) {
         if (protocol) {
             set_nv_from_sv(aTHX_ &nva[out++], ":protocol", 9, protocol_sv);
@@ -656,53 +780,605 @@ uniform_request_to_nva(pTHX_ AV *view, size_t *count_out)
         set_nv_from_sv(aTHX_ &nva[out++], ":path", 5, target_sv);
     }
 
-    append_normal_headers(aTHX_ nva, out, headers, name_buffer);
+    append_native_headers(aTHX_ nva, out, &view.headers, name_buffer);
     *count_out = count;
     return nva;
 }
 
 static nghttp2_nv *
-uniform_response_to_nva(pTHX_ AV *view, size_t *count_out)
+uniform_response_to_nva(pTHX_ unblock_h2_session *ps, SV *message,
+                        size_t *count_out)
 {
-    AV *headers = validate_uniform_fast_view(aTHX_ view, UHFP_KIND_RESPONSE);
-    SV *status_sv = uniform_fast_slot(aTHX_ view, UHFP_SLOT_STATUS);
-    STRLEN status_len;
-    const char *status;
+    uhttp_native_view view;
     IV status_value;
     size_t normal_count;
     size_t normal_name_bytes;
     size_t count;
     nghttp2_nv *nva;
+    char *status_buffer;
     char *name_buffer;
 
-    if (!status_sv || SvROK(status_sv)) {
-        croak("Uniform::HTTP FastPath response requires status");
-    }
+    validate_uniform_native_view(
+        aTHX_ ps, message, UHTTP_KIND_RESPONSE, &view);
 
-    status = SvPVbyte(status_sv, status_len);
-    status_value = SvIV(status_sv);
-    if (status_len != 3
-        || status[0] < '1' || status[0] > '5'
-        || status[1] < '0' || status[1] > '9'
-        || status[2] < '0' || status[2] > '9'
-        || status_value < 100 || status_value > 599) {
+    status_value = SvIV(view.status);
+    if (status_value < 100 || status_value > 599) {
         croak("response_headers(): status must be an integer from 100 through 599");
     }
 
-    normal_count = measure_normal_headers(aTHX_ headers, &normal_name_bytes);
+    normal_count = measure_native_headers(
+        aTHX_ &view.headers, &normal_name_bytes);
     count = 1 + normal_count;
     nva = (nghttp2_nv *)calloc(
-        1, count * sizeof(*nva) + normal_name_bytes);
+        1, count * sizeof(*nva) + 3 + normal_name_bytes);
     if (!nva) {
-        croak("unable to allocate HTTP/2 Uniform FastPath header block");
+        croak("unable to allocate HTTP/2 Uniform native header block");
     }
-    name_buffer = (char *)(nva + count);
 
-    set_nv_from_sv(aTHX_ &nva[0], ":status", 7, status_sv);
-    append_normal_headers(aTHX_ nva, 1, headers, name_buffer);
+    status_buffer = (char *)(nva + count);
+    status_buffer[0] = (char)('0' + (status_value / 100) % 10);
+    status_buffer[1] = (char)('0' + (status_value / 10) % 10);
+    status_buffer[2] = (char)('0' + status_value % 10);
+    name_buffer = status_buffer + 3;
 
+    nva[0].name = (uint8_t *)":status";
+    nva[0].namelen = 7;
+    nva[0].value = (uint8_t *)status_buffer;
+    nva[0].valuelen = 3;
+    nva[0].flags = NGHTTP2_NV_FLAG_NONE;
+
+    append_native_headers(aTHX_ nva, 1, &view.headers, name_buffer);
     *count_out = count;
     return nva;
+}
+
+static int
+bytes_equal(const char *value, size_t value_len, const char *literal)
+{
+    size_t literal_len = strlen(literal);
+    return value_len == literal_len
+        && memcmp(value, literal, literal_len) == 0;
+}
+
+static int
+span_is_token(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len) {
+        return 0;
+    }
+    for (i = 0; i < len; i++) {
+        if (!http_token_char((unsigned char)value[i])) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static const char *
+validate_received_normal_field(const unblock_h2_header_field *field)
+{
+    size_t i;
+
+    if (!field->namelen) {
+        return "HTTP/2 field name must not be empty";
+    }
+
+    for (i = 0; i < field->namelen; i++) {
+        unsigned char ch = (unsigned char)field->name[i];
+        if (ch >= 'A' && ch <= 'Z') {
+            return "HTTP/2 field names must be lowercase";
+        }
+        if (!http_token_char(ch)) {
+            return "HTTP/2 field name must be an HTTP token";
+        }
+    }
+
+    for (i = 0; i < field->valuelen; i++) {
+        unsigned char ch = (unsigned char)field->value[i];
+        if (ch <= 0x08 || (ch >= 0x0a && ch <= 0x1f) || ch == 0x7f) {
+            return "HTTP/2 field value contains a prohibited control byte";
+        }
+    }
+
+    if (bytes_equal(field->name, field->namelen, "connection")
+        || bytes_equal(field->name, field->namelen, "keep-alive")
+        || bytes_equal(field->name, field->namelen, "proxy-connection")
+        || bytes_equal(field->name, field->namelen, "transfer-encoding")
+        || bytes_equal(field->name, field->namelen, "upgrade")) {
+        return "HTTP/2 forbids connection-specific field";
+    }
+
+    if (bytes_equal(field->name, field->namelen, "te")
+        && !ascii_equal_ci(field->value, field->valuelen, "trailers")) {
+        return "HTTP/2 TE is limited to trailers";
+    }
+
+    return NULL;
+}
+
+static const char *
+validate_request_target(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len) {
+        return "request_from_headers(): target must not be empty";
+    }
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch <= 0x20 || ch == 0x7f) {
+            return "request_from_headers(): target contains spaces or control bytes";
+        }
+    }
+    return NULL;
+}
+
+static const char *
+validate_request_scheme(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len
+        || !((value[0] >= 'A' && value[0] <= 'Z')
+            || (value[0] >= 'a' && value[0] <= 'z'))) {
+        return "request_from_headers(): scheme must be a valid URI scheme";
+    }
+
+    for (i = 1; i < len; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (!((ch >= 'A' && ch <= 'Z')
+            || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9')
+            || ch == '+' || ch == '-' || ch == '.')) {
+            return "request_from_headers(): scheme must be a valid URI scheme";
+        }
+    }
+    return NULL;
+}
+
+static const char *
+validate_request_authority(const char *value, size_t len)
+{
+    size_t i;
+
+    if (!len) {
+        return "request_from_headers(): authority must not be empty";
+    }
+
+    for (i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)value[i];
+        if (ch <= 0x20 || ch == 0x7f
+            || ch == '/' || ch == '?' || ch == '#') {
+            return "request_from_headers(): authority contains a prohibited delimiter or control byte";
+        }
+    }
+    return NULL;
+}
+
+static void
+set_native_span(uhttp_native_bytes *span, const char *data, size_t len)
+{
+    span->data = data;
+    span->len = (STRLEN)len;
+}
+
+static U32
+received_native_flags(U32 kind, int complete)
+{
+    U32 flags = UHTTP_HEADERS_LOSSLESS | UHTTP_TRAILERS_LOSSLESS;
+
+    if (kind == UHTTP_KIND_REQUEST) {
+        flags |= UHTTP_TARGET_EXACT;
+    }
+
+    if (complete) {
+        flags |= UHTTP_COMPLETE;
+    }
+    else {
+        flags |= UHTTP_MUTABLE | UHTTP_BODY_MUTABLE
+            | UHTTP_TRAILERS_MUTABLE;
+    }
+
+    return flags;
+}
+
+static SV *
+request_from_native_headers(pTHX_ unblock_h2_session *ps,
+                            const unblock_h2_header_block *block,
+                            const char **error_out)
+{
+    const unblock_h2_header_field *method = NULL;
+    const unblock_h2_header_field *scheme = NULL;
+    const unblock_h2_header_field *authority = NULL;
+    const unblock_h2_header_field *path = NULL;
+    const unblock_h2_header_field *protocol = NULL;
+    uhttp_native_field *normal = NULL;
+    size_t normal_count = 0;
+    size_t i;
+    int saw_normal = 0;
+    const char *error = NULL;
+    uhttp_native_input input;
+    SV *object;
+
+    if (block->count) {
+        normal = (uhttp_native_field *)calloc(block->count, sizeof(*normal));
+        if (!normal) {
+            croak("unable to allocate HTTP/2 native request fields");
+        }
+    }
+
+    for (i = 0; i < block->count; i++) {
+        const unblock_h2_header_field *field = &block->fields[i];
+
+        if (field->namelen && field->name[0] == ':') {
+            if (saw_normal) {
+                error = "request_from_headers(): pseudo-header follows a regular field";
+                break;
+            }
+
+#define UHTTP_H2_PSEUDO(literal, slot) \
+            if (bytes_equal(field->name, field->namelen, literal)) { \
+                if (slot) { \
+                    error = "request_from_headers(): duplicate pseudo-header"; \
+                    break; \
+                } \
+                slot = field; \
+                continue; \
+            }
+            UHTTP_H2_PSEUDO(":method", method)
+            UHTTP_H2_PSEUDO(":scheme", scheme)
+            UHTTP_H2_PSEUDO(":authority", authority)
+            UHTTP_H2_PSEUDO(":path", path)
+            UHTTP_H2_PSEUDO(":protocol", protocol)
+#undef UHTTP_H2_PSEUDO
+            error = "request_from_headers(): unsupported pseudo-header";
+            break;
+        }
+
+        saw_normal = 1;
+        error = validate_received_normal_field(field);
+        if (error) {
+            break;
+        }
+
+        set_native_span(&normal[normal_count].name,
+            field->name, field->namelen);
+        set_native_span(&normal[normal_count].value,
+            field->value, field->valuelen);
+        normal_count++;
+    }
+
+    if (!error && (!method || !method->valuelen)) {
+        error = "request_from_headers(): missing :method";
+    }
+    if (!error && !span_is_token(method->value, method->valuelen)) {
+        error = "request_from_headers(): method must be an HTTP token";
+    }
+
+    if (!error && ascii_equal_ci(method->value, method->valuelen, "CONNECT")) {
+        if (!authority || !authority->valuelen) {
+            error = "request_from_headers(): CONNECT requires :authority";
+        }
+        else if (protocol) {
+            if (!protocol->valuelen) {
+                error = "request_from_headers(): extended CONNECT requires nonempty :protocol";
+            }
+            else if (!scheme || !scheme->valuelen) {
+                error = "request_from_headers(): extended CONNECT requires :scheme";
+            }
+            else if (!path || !path->valuelen) {
+                error = "request_from_headers(): extended CONNECT requires :path";
+            }
+        }
+        else if (scheme || path) {
+            error = "request_from_headers(): ordinary CONNECT must omit :scheme and :path";
+        }
+    }
+    else if (!error) {
+        if (protocol) {
+            error = "request_from_headers(): :protocol requires CONNECT";
+        }
+        else if (!scheme || !scheme->valuelen) {
+            error = "request_from_headers(): missing :scheme";
+        }
+        else if (!path || !path->valuelen) {
+            error = "request_from_headers(): missing :path";
+        }
+        else if (!authority || !authority->valuelen) {
+            error = "request_from_headers(): missing :authority";
+        }
+    }
+
+    if (!error && protocol
+        && !span_is_token(protocol->value, protocol->valuelen)) {
+        error = "request_from_headers(): protocol must be an HTTP token";
+    }
+    if (!error && scheme) {
+        error = validate_request_scheme(scheme->value, scheme->valuelen);
+    }
+    if (!error && authority) {
+        error = validate_request_authority(
+            authority->value, authority->valuelen);
+    }
+
+    if (!error) {
+        const char *target;
+        size_t target_len;
+
+        if (path) {
+            target = path->value;
+            target_len = path->valuelen;
+        }
+        else {
+            target = authority->value;
+            target_len = authority->valuelen;
+        }
+
+        error = validate_request_target(target, target_len);
+        if (!error) {
+            uhttp_native_input_init(&input, UHTTP_KIND_REQUEST);
+            input.flags = received_native_flags(
+                UHTTP_KIND_REQUEST,
+                (block->flags & NGHTTP2_FLAG_END_STREAM) ? 1 : 0);
+            set_native_span(&input.version, "2", 1);
+            set_native_span(&input.method, method->value, method->valuelen);
+            set_native_span(&input.target, target, target_len);
+            if (scheme) {
+                set_native_span(
+                    &input.scheme, scheme->value, scheme->valuelen);
+            }
+            if (authority) {
+                set_native_span(
+                    &input.authority, authority->value, authority->valuelen);
+            }
+            if (protocol) {
+                set_native_span(
+                    &input.protocol, protocol->value, protocol->valuelen);
+            }
+            input.headers = normal;
+            input.header_count = normal_count;
+            object = uhttp_native_from_validated(
+                aTHX_ &ps->uniform_api, &input, UHTTP_NATIVE_TRUSTED);
+            free(normal);
+            *error_out = NULL;
+            return object;
+        }
+    }
+
+    free(normal);
+    *error_out = error;
+    return NULL;
+}
+
+static SV *
+response_from_native_headers(pTHX_ unblock_h2_session *ps,
+                             const unblock_h2_header_block *block,
+                             const char **error_out)
+{
+    const unblock_h2_header_field *status = NULL;
+    uhttp_native_field *normal = NULL;
+    size_t normal_count = 0;
+    size_t i;
+    int saw_normal = 0;
+    IV status_value = 0;
+    const char *error = NULL;
+    uhttp_native_input input;
+    SV *object;
+
+    if (block->count) {
+        normal = (uhttp_native_field *)calloc(block->count, sizeof(*normal));
+        if (!normal) {
+            croak("unable to allocate HTTP/2 native response fields");
+        }
+    }
+
+    for (i = 0; i < block->count; i++) {
+        const unblock_h2_header_field *field = &block->fields[i];
+
+        if (field->namelen && field->name[0] == ':') {
+            size_t j;
+
+            if (saw_normal) {
+                error = "response_from_headers(): pseudo-header follows a regular field";
+                break;
+            }
+            if (!bytes_equal(field->name, field->namelen, ":status")) {
+                error = "response_from_headers(): unsupported pseudo-header";
+                break;
+            }
+            if (status) {
+                error = "response_from_headers(): duplicate pseudo-header";
+                break;
+            }
+
+            status = field;
+            for (j = 0; j < field->valuelen; j++) {
+                unsigned char ch = (unsigned char)field->value[j];
+                if (ch < '0' || ch > '9') {
+                    error = "response_from_headers(): status must be an integer from 100 through 599";
+                    break;
+                }
+                if (status_value > 599) {
+                    error = "response_from_headers(): status must be an integer from 100 through 599";
+                    break;
+                }
+                status_value = status_value * 10 + (ch - '0');
+            }
+            if (error) {
+                break;
+            }
+            continue;
+        }
+
+        saw_normal = 1;
+        error = validate_received_normal_field(field);
+        if (error) {
+            break;
+        }
+
+        set_native_span(&normal[normal_count].name,
+            field->name, field->namelen);
+        set_native_span(&normal[normal_count].value,
+            field->value, field->valuelen);
+        normal_count++;
+    }
+
+    if (!error && (!status || !status->valuelen
+        || status_value < 100 || status_value > 599)) {
+        error = "response_from_headers(): status must be an integer from 100 through 599";
+    }
+
+    if (!error) {
+        int complete = (status_value >= 100 && status_value < 200)
+            ? 1
+            : ((block->flags & NGHTTP2_FLAG_END_STREAM) ? 1 : 0);
+
+        uhttp_native_input_init(&input, UHTTP_KIND_RESPONSE);
+        input.flags = received_native_flags(UHTTP_KIND_RESPONSE, complete);
+        set_native_span(&input.version, "2", 1);
+        input.status = status_value;
+        input.headers = normal;
+        input.header_count = normal_count;
+        object = uhttp_native_from_validated(
+            aTHX_ &ps->uniform_api, &input, UHTTP_NATIVE_TRUSTED);
+        free(normal);
+        *error_out = NULL;
+        return object;
+    }
+
+    free(normal);
+    *error_out = error;
+    return NULL;
+}
+
+static AV *
+trailers_from_native_headers(pTHX_ const unblock_h2_header_block *block,
+                             const char **error_out)
+{
+    AV *headers = newAV();
+    size_t i;
+
+    for (i = 0; i < block->count; i++) {
+        const unblock_h2_header_field *field = &block->fields[i];
+        const char *error;
+        AV *pair;
+
+        if (field->namelen && field->name[0] == ':') {
+            SvREFCNT_dec((SV *)headers);
+            *error_out = "apply_trailers(): unsupported pseudo-header";
+            return NULL;
+        }
+
+        error = validate_received_normal_field(field);
+        if (error) {
+            SvREFCNT_dec((SV *)headers);
+            *error_out = error;
+            return NULL;
+        }
+
+        pair = newAV();
+        av_push(pair, newSVpvn(field->name, field->namelen));
+        av_push(pair, newSVpvn(field->value, field->valuelen));
+        av_push(headers, newRV_noinc((SV *)pair));
+    }
+
+    *error_out = NULL;
+    return headers;
+}
+
+static int
+header_block_has_name(const unblock_h2_header_block *block,
+                      const char *name)
+{
+    size_t i;
+
+    for (i = 0; i < block->count; i++) {
+        if (bytes_equal(
+                block->fields[i].name,
+                block->fields[i].namelen,
+                name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void
+attach_native_header_result(pTHX_ unblock_h2_session *ps,
+                            const nghttp2_frame *frame, HV *hv,
+                            unblock_h2_header_block *block)
+{
+    const char *error = NULL;
+    SV *message = NULL;
+    AV *headers = NULL;
+
+    if (!block) {
+        hv_store(hv, "header_error", 12,
+            newSVpv("HTTP/2 header block state is missing", 0), 0);
+        hv_store(hv, "header_error_code", 17,
+            newSVuv(NGHTTP2_PROTOCOL_ERROR), 0);
+        return;
+    }
+
+    if (block->error) {
+        hv_store(hv, "header_error", 12,
+            newSVpv(block->error, 0), 0);
+        hv_store(hv, "header_error_code", 17,
+            newSVuv(block->error_code), 0);
+        return;
+    }
+
+    switch (block->category) {
+        case NGHTTP2_HCAT_REQUEST:
+            if (!ps->server) {
+                error = "unexpected HTTP/2 request header category";
+                break;
+            }
+            message = request_from_native_headers(
+                aTHX_ ps, block, &error);
+            break;
+
+        case NGHTTP2_HCAT_RESPONSE:
+            if (ps->server) {
+                error = "unexpected HTTP/2 response header category";
+                break;
+            }
+            message = response_from_native_headers(
+                aTHX_ ps, block, &error);
+            break;
+
+        case NGHTTP2_HCAT_HEADERS:
+            if (!ps->server && header_block_has_name(block, ":status")) {
+                message = response_from_native_headers(
+                    aTHX_ ps, block, &error);
+            }
+            else {
+                headers = trailers_from_native_headers(
+                    aTHX_ block, &error);
+            }
+            break;
+
+        default:
+            error = "unsupported HTTP/2 header category";
+            break;
+    }
+
+    if (error) {
+        hv_store(hv, "header_error", 12, newSVpv(error, 0), 0);
+        hv_store(hv, "header_error_code", 17,
+            newSVuv(NGHTTP2_PROTOCOL_ERROR), 0);
+        return;
+    }
+
+    if (message) {
+        hv_store(hv, "uniform_message", 15, message, 0);
+    }
+    else if (headers) {
+        hv_store(hv, "native_headers", 14,
+            newRV_noinc((SV *)headers), 0);
+    }
 }
 
 static int
@@ -923,19 +1599,31 @@ on_begin_headers_callback(nghttp2_session *session,
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
     AV *args;
-    int result;
+    int result = 0;
 
-    if (!ps->cb_begin_headers) {
-        return 0;
+    if (ps->cb_begin_headers) {
+        args = newAV();
+        av_push(args, newSViv(frame->hd.stream_id));
+        av_push(args, newSViv(frame->hd.type));
+        av_push(args, newSViv(frame->hd.flags));
+        result = call_scalar_callback(
+            aTHX_ ps, ps->cb_begin_headers, args);
+        SvREFCNT_dec((SV *)args);
+        if (result != 0) {
+            return result;
+        }
     }
 
-    args = newAV();
-    av_push(args, newSViv(frame->hd.stream_id));
-    av_push(args, newSViv(frame->hd.type));
-    av_push(args, newSViv(frame->hd.flags));
-    result = call_scalar_callback(aTHX_ ps, ps->cb_begin_headers, args);
-    SvREFCNT_dec((SV *)args);
-    return result;
+    if (frame->hd.type == NGHTTP2_HEADERS
+        && !start_header_block(aTHX_ ps, frame)) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpv(
+                "unable to allocate HTTP/2 receive header block", 0);
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    return 0;
 }
 
 static int
@@ -950,21 +1638,27 @@ on_header_callback(nghttp2_session *session,
 {
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
-    AV *args;
-    int result;
+    unblock_h2_header_block *block;
 
-    if (!ps->cb_header) {
-        return 0;
+    block = find_header_block(ps, frame->hd.stream_id);
+    if (!block) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpv(
+                "HTTP/2 receive header block state is missing", 0);
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
     }
 
-    args = newAV();
-    av_push(args, newSViv(frame->hd.stream_id));
-    av_push(args, newSVpvn((const char *)name, namelen));
-    av_push(args, newSVpvn((const char *)value, valuelen));
-    av_push(args, newSViv(flags));
-    result = call_scalar_callback(aTHX_ ps, ps->cb_header, args);
-    SvREFCNT_dec((SV *)args);
-    return result;
+    if (!append_header_field(
+            aTHX_ ps, block, name, namelen, value, valuelen)) {
+        if (!ps->callback_error) {
+            ps->callback_error = newSVpv(
+                "unable to allocate HTTP/2 receive header field", 0);
+        }
+        return NGHTTP2_ERR_CALLBACK_FAILURE;
+    }
+
+    return 0;
 }
 
 static int
@@ -974,15 +1668,29 @@ on_frame_recv_callback(nghttp2_session *session,
 {
     dTHX;
     unblock_h2_session *ps = (unblock_h2_session *)user_data;
+    unblock_h2_header_block *block = NULL;
+    HV *frame_hv;
     AV *args;
     int result;
 
+    if (frame->hd.type == NGHTTP2_HEADERS) {
+        block = take_header_block(ps, frame->hd.stream_id);
+    }
+
     if (!ps->cb_frame_recv) {
+        free_header_block(aTHX_ block);
         return 0;
     }
 
+    frame_hv = frame_to_hv(aTHX_ frame);
+    if (frame->hd.type == NGHTTP2_HEADERS) {
+        attach_native_header_result(
+            aTHX_ ps, frame, frame_hv, block);
+    }
+    free_header_block(aTHX_ block);
+
     args = newAV();
-    av_push(args, newRV_noinc((SV *)frame_to_hv(aTHX_ frame)));
+    av_push(args, newRV_noinc((SV *)frame_hv));
     result = call_scalar_callback(aTHX_ ps, ps->cb_frame_recv, args);
     SvREFCNT_dec((SV *)args);
     return result;
@@ -1038,6 +1746,7 @@ on_stream_close_callback(nghttp2_session *session,
     int result = 0;
 
     remove_provider(aTHX_ ps, stream_id);
+    remove_header_block(aTHX_ ps, stream_id);
 
     if (!ps->cb_stream_close) {
         return 0;
@@ -1146,21 +1855,30 @@ configure_callbacks(pTHX_ nghttp2_session_callbacks **callbacks_out)
 }
 
 static unblock_h2_session *
-new_session(pTHX_ HV *callbacks_hv, int server)
+new_session(pTHX_ HV *callbacks_hv, int server, size_t max_header_list_size)
 {
     unblock_h2_session *ps;
+    uhttp_native_api uniform_api;
     nghttp2_session_callbacks *callbacks = NULL;
     nghttp2_option *option = NULL;
     int rv;
+
+    if (!uhttp_native_init(aTHX_ &uniform_api, UHTTP_NATIVE_ABI_VERSION)) {
+        croak("Uniform::HTTP 0.06 native ABI is unavailable or incompatible");
+    }
 
     ps = (unblock_h2_session *)calloc(1, sizeof(*ps));
     if (!ps) {
         croak("unable to allocate HTTP/2 session");
     }
+    ps->uniform_api = uniform_api;
+    ps->server = server ? 1 : 0;
+    ps->max_header_list_size = max_header_list_size;
 
     load_callbacks(aTHX_ ps, callbacks_hv);
     rv = configure_callbacks(aTHX_ &callbacks);
     if (rv != 0) {
+        free_header_blocks(aTHX_ ps);
         release_callbacks(aTHX_ ps);
         free(ps);
         croak("nghttp2_session_callbacks_new failed (%d): %s",
@@ -1224,26 +1942,36 @@ version_string()
 MODULE = Unblock::HTTP2    PACKAGE = Unblock::HTTP2::_nghttp2::Session
 
 SV *
-_new_client_xs(class, callbacks_hv)
+_new_client_xs(class, callbacks_hv, max_header_list_size)
         char *class
         HV *callbacks_hv
+        UV max_header_list_size
     PREINIT:
         unblock_h2_session *ps;
     CODE:
-        ps = new_session(aTHX_ callbacks_hv, 0);
+        if (max_header_list_size == 0) {
+            croak("max_header_list_size must be positive");
+        }
+        ps = new_session(
+            aTHX_ callbacks_hv, 0, (size_t)max_header_list_size);
         RETVAL = newSV(0);
         sv_setref_pv(RETVAL, class, (void *)ps);
     OUTPUT:
         RETVAL
 
 SV *
-_new_server_xs(class, callbacks_hv)
+_new_server_xs(class, callbacks_hv, max_header_list_size)
         char *class
         HV *callbacks_hv
+        UV max_header_list_size
     PREINIT:
         unblock_h2_session *ps;
     CODE:
-        ps = new_session(aTHX_ callbacks_hv, 1);
+        if (max_header_list_size == 0) {
+            croak("max_header_list_size must be positive");
+        }
+        ps = new_session(
+            aTHX_ callbacks_hv, 1, (size_t)max_header_list_size);
         RETVAL = newSV(0);
         sv_setref_pv(RETVAL, class, (void *)ps);
     OUTPUT:
@@ -1277,6 +2005,7 @@ DESTROY(self)
             free_provider(aTHX_ provider);
             provider = next;
         }
+        free_header_blocks(aTHX_ ps);
         release_callbacks(aTHX_ ps);
         free(ps);
         sv_setiv(SvRV(self), 0);
@@ -1498,9 +2227,9 @@ get_stream_local_close(self, stream_id)
         RETVAL
 
 int
-_submit_request_uniform_native(self, view_av, provider_sv)
+_submit_request_uniform_native(self, message, provider_sv)
         SV *self
-        AV *view_av
+        SV *message
         SV *provider_sv
     PREINIT:
         unblock_h2_session *ps;
@@ -1512,7 +2241,7 @@ _submit_request_uniform_native(self, view_av, provider_sv)
         int32_t stream_id;
     CODE:
         ps = session_from_sv(aTHX_ self);
-        nva = uniform_request_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_request_to_nva(aTHX_ ps, message, &nvlen);
 
         if (SvOK(provider_sv)) {
             if (!SvROK(provider_sv) || SvTYPE(SvRV(provider_sv)) != SVt_PVCV) {
@@ -1600,10 +2329,10 @@ _submit_request_native(self, headers_av, provider_sv)
         RETVAL
 
 int
-_submit_response_uniform_no_body_native(self, stream_id, view_av)
+_submit_response_uniform_no_body_native(self, stream_id, message)
         SV *self
         int stream_id
-        AV *view_av
+        SV *message
     PREINIT:
         unblock_h2_session *ps;
         nghttp2_nv *nva;
@@ -1611,7 +2340,7 @@ _submit_response_uniform_no_body_native(self, stream_id, view_av)
         int rv;
     CODE:
         ps = session_from_sv(aTHX_ self);
-        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_response_to_nva(aTHX_ ps, message, &nvlen);
         rv = nghttp2_submit_response(ps->session, stream_id, nva, nvlen, NULL);
         if (nva) free(nva);
         if (rv != 0) {
@@ -1623,10 +2352,10 @@ _submit_response_uniform_no_body_native(self, stream_id, view_av)
         RETVAL
 
 int
-_submit_response_uniform_streaming_native(self, stream_id, view_av, provider_sv)
+_submit_response_uniform_streaming_native(self, stream_id, message, provider_sv)
         SV *self
         int stream_id
-        AV *view_av
+        SV *message
         SV *provider_sv
     PREINIT:
         unblock_h2_session *ps;
@@ -1644,7 +2373,7 @@ _submit_response_uniform_streaming_native(self, stream_id, view_av, provider_sv)
             croak("response data provider must be a coderef");
         }
 
-        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_response_to_nva(aTHX_ ps, message, &nvlen);
         provider = (unblock_h2_provider *)calloc(1, sizeof(*provider));
         if (!provider) {
             if (nva) free(nva);
@@ -1740,10 +2469,10 @@ _submit_response_streaming_native(self, stream_id, headers_av, provider_sv)
         RETVAL
 
 int
-_submit_response_headers_uniform_native(self, stream_id, view_av, end_stream)
+_submit_response_headers_uniform_native(self, stream_id, message, end_stream)
         SV *self
         int stream_id
-        AV *view_av
+        SV *message
         int end_stream
     PREINIT:
         unblock_h2_session *ps;
@@ -1753,7 +2482,7 @@ _submit_response_headers_uniform_native(self, stream_id, view_av, end_stream)
         uint8_t flags;
     CODE:
         ps = session_from_sv(aTHX_ self);
-        nva = uniform_response_to_nva(aTHX_ view_av, &nvlen);
+        nva = uniform_response_to_nva(aTHX_ ps, message, &nvlen);
         flags = end_stream ? NGHTTP2_FLAG_END_STREAM : NGHTTP2_FLAG_NONE;
         rv = nghttp2_submit_headers(
             ps->session, flags, stream_id, NULL, nva, nvlen, NULL);
