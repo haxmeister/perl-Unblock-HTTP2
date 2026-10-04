@@ -14,5 +14,8 @@ Revision history for Unblock-HTTP2
     - Add first-class request and response trailers over trailing HEADERS.
     - Add ordinary CONNECT and generic Extended CONNECT :protocol mapping.
     - Advertise SETTINGS_ENABLE_CONNECT_PROTOCOL on the server by default.
+    - Add graceful client/server GOAWAY draining while allowing accepted streams
+      to finish.
+    - Advertise ENABLE_PUSH = 0 until server push has a public Unblock model.
     - Add in-memory client/server protocol tests with no socket or event loop,
       including trailers and Extended CONNECT.
