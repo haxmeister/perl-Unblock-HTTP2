@@ -170,6 +170,38 @@ sub _consume_stream_body {
     return;
 }
 
+sub ping {
+    my ($self, $opaque) = @_;
+
+    croak 'ping(): connection is closed'
+        if $self->{closed} || !$self->{session};
+    croak 'ping(): opaque data is required'
+        unless defined $opaque;
+
+    my $bytes = $self->_body_bytes('ping()', $opaque);
+    croak 'ping(): opaque data must be exactly 8 bytes'
+        unless length($bytes) == 8;
+
+    $self->{session}->submit_ping($bytes);
+    return $self;
+}
+
+sub _handle_ping_frame {
+    my ($self, $frame) = @_;
+    return 0 unless (($frame->{type} // -1) == 6);
+
+    my $opaque = defined($frame->{opaque_data})
+        ? "$frame->{opaque_data}"
+        : '';
+
+    my $callback = (($frame->{flags} || 0) & 0x1)
+        ? 'on_ping_ack'
+        : 'on_ping';
+
+    $self->_invoke_control_callback($callback, $opaque);
+    return 1;
+}
+
 sub local_settings {
     my ($self) = @_;
     return { %{ $self->{local_settings} || {} } };
