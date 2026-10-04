@@ -242,8 +242,14 @@ channel for nghttp2 diagnostic strings.
 ## Graceful draining
 
 Client and Server expose drain() as the graceful connection-shutdown operation.
-It submits GOAWAY and prevents new locally initiated client streams while
-letting streams already accepted by the peer finish normally.
+It submits a NO_ERROR GOAWAY and prevents new locally initiated client streams
+while letting streams already accepted by the peer finish normally.
+
+goaway() is the lower-level control operation. It accepts an explicit 32-bit
+HTTP/2 error code, opaque debug bytes, and optionally a 31-bit last-stream
+boundary. The engine retains the latest locally submitted GOAWAY facts through
+local_goaway(). Successive GOAWAY frames may only keep or lower the
+last-stream-id boundary, matching the protocol's monotonic shutdown rule.
 
 The server remembers the highest peer-initiated request stream it has seen and
 uses that value when initiating GOAWAY. The client advertises ENABLE_PUSH = 0,
