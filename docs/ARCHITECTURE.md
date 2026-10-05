@@ -136,8 +136,8 @@ Uniform trailer fields are sent as trailing HEADERS.
 For a streaming local body, trailer fields are snapshotted when `end()` is
 called.
 
-Servers can send one or more informational responses with `send_informational()` before
-the final `respond()`.
+Servers can send one or more informational responses with
+`send_informational()` before the final `respond()`.
 
 ## CONNECT
 
