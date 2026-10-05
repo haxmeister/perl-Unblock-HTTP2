@@ -1,13 +1,13 @@
 # Unblock::HTTP2 feature scope
 
-Unblock::HTTP2 0.03 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.04 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 protocol engine.
 
 That does not mean every historical or optional HTTP/2 extension is included.
 
 ## Included
 
-The 0.03 core includes:
+The 0.04 core includes:
 
 - client and server HTTP/2 sessions
 - connection preface handling
@@ -83,7 +83,7 @@ protocol layers.
 
 ### Optional extension frames
 
-Optional extensions such as ORIGIN and ALTSVC are not required for the 0.03
+Optional extensions such as ORIGIN and ALTSVC are not required for the 0.04
 core.
 
 Unknown frame types are safely ignored as required by HTTP/2.
@@ -99,4 +99,4 @@ Future changes should normally be one of:
 - documentation improvements
 
 The core transport boundary and HTTP/2 session model do not need further
-feature work for the 0.03 release.
+feature work for the 0.04 release.
