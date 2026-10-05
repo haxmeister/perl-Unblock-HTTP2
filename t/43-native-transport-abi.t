@@ -21,6 +21,16 @@ like Unblock::HTTP2::NativeABI::c_header(),
     qr/ub_http2_output_sink_v1/,
     'native transport ABI publishes the output sink contract';
 
+my $header = Unblock::HTTP2::NativeABI::c_header();
+my @common_order = map { index($header, $_) }
+    ('void *(*create)', 'int (*input)', 'int (*eof)', 'void (*destroy)');
+ok $common_order[0] < $common_order[1]
+    && $common_order[1] < $common_order[2]
+    && $common_order[2] < $common_order[3],
+    'native input ABI prefix follows the HTTP1 create/input/eof/destroy order';
+ok index($header, 'int (*output)') > $common_order[3],
+    'HTTP2 output operations extend the common input ABI prefix';
+
 my (@errors, $request_seen, $response_seen, $complete);
 my $server = Unblock::HTTP2::Server->new(
     on_request => sub {
