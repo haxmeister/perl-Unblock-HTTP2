@@ -83,12 +83,12 @@ typedef struct {
     void *(*create)(pTHX_ SV *engine);
     int (*input)(pTHX_ void *context, const char *data, size_t length,
         size_t *consumed);
+    int (*eof)(pTHX_ void *context);
+    void (*destroy)(pTHX_ void *context);
     int (*output)(pTHX_ void *context, ub_http2_output_sink_v1 sink,
         void *sink_context, size_t *produced);
     int (*want_read)(pTHX_ void *context);
     int (*want_write)(pTHX_ void *context);
-    int (*eof)(pTHX_ void *context);
-    void (*destroy)(pTHX_ void *context);
 } ub_http2_native_ops_v1;
 
 typedef struct {
@@ -2449,11 +2449,11 @@ static const ub_http2_native_ops_v1 ub_http2_native_ops = {
     "Unblock::HTTP2 native transport",
     ub_http2_native_create,
     ub_http2_native_input,
+    ub_http2_native_eof,
+    ub_http2_native_destroy,
     ub_http2_native_output,
     ub_http2_native_want_read,
-    ub_http2_native_want_write,
-    ub_http2_native_eof,
-    ub_http2_native_destroy
+    ub_http2_native_want_write
 };
 
 typedef struct {
