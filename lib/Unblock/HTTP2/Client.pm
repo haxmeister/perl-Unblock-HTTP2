@@ -9,7 +9,7 @@ use parent 'Unblock::HTTP2::_Connection';
 use Unblock::HTTP2::_Headers;
 use Unblock::HTTP2::Transaction;
 
-our $VERSION = '0.04';
+our $VERSION = '0.10';
 
 use constant {
     H2_DATA              => 0,
@@ -554,8 +554,8 @@ sub _write_stream_body {
     $provider->{blocked} = 1 if $blocked;
     return $blocked ? 0 : 1;
 }
-sub _inform_stream {
-    croak 'inform(): client-side streams cannot send Responses';
+sub _send_informational_stream {
+    croak 'send_informational(): client-side streams cannot send Responses';
 }
 
 sub _respond_stream {
