@@ -5,7 +5,7 @@ use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 
-our $VERSION = '0.04';
+our $VERSION = '0.10';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
 
@@ -61,6 +61,7 @@ sub error_name {
 sub unconsumed_bytes { return $_[0]{unconsumed_bytes} }
 sub is_complete  { return $_[0]{state} eq 'complete' ? 1 : 0 }
 sub is_cancelled { return $_[0]{state} eq 'cancelled' ? 1 : 0 }
+sub is_error     { return $_[0]{state} eq 'error' ? 1 : 0 }
 sub is_terminal  { return $TERMINAL{$_[0]{state}} ? 1 : 0 }
 
 sub write {
@@ -86,14 +87,14 @@ sub end {
     return $self;
 }
 
-sub inform {
+sub send_informational {
     my ($self, $response) = @_;
-    croak 'inform(): Transaction is already terminal' if $self->is_terminal;
+    croak 'send_informational(): Transaction is already terminal' if $self->is_terminal;
 
     my $connection = $self->{connection}
-        or croak 'inform(): HTTP/2 connection is no longer available';
+        or croak 'send_informational(): HTTP/2 connection is no longer available';
 
-    $connection->_inform_stream($self, $response);
+    $connection->_send_informational_stream($self, $response);
     return $self;
 }
 
@@ -320,7 +321,7 @@ C<unconsumed_bytes()> reports body bytes still waiting for stream-level credit.
 
 A server Transaction can send an informational response with:
 
-    $transaction->inform($response);
+    $transaction->send_informational($response);
 
 The final response uses:
 
@@ -357,6 +358,7 @@ Useful state accessors include:
     state
     is_complete
     is_cancelled
+    is_error
     is_terminal
 
 HTTP/2 half-close is preserved. One direction may finish before the full
