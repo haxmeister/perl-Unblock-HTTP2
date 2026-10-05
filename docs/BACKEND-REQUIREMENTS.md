@@ -121,6 +121,10 @@ does not maintain a second transport send queue.
 The optional NativeABI also accepts borrowed contiguous input windows. It must
 never retain the caller's input pointer after the native input call returns.
 
+The binding and external consumers use the installed
+`Unblock/HTTP2/NativeABI/unblock_http2_native_abi.h` declaration so the public
+header and compiled operation layout cannot silently drift apart.
+
 ## Reentrancy
 
 Recursive `input()` or `output()` while libnghttp2 is already executing is
