@@ -13,8 +13,8 @@ Revision history for Unblock-HTTP2
       Perl discovery definition.
     - Build the XS native transport implementation against that same public
       header so the installed declaration and compiled layout stay in sync.
-    - Update introductory examples and integration documentation to use the
-      common Unblock HTTP API vocabulary.
+    - Review README, public POD, and docs for the 0.10 API, including callback
+      signatures, NativeABI discovery, and an explicit upgrade note.
     - Jump from 0.04 to 0.10 to make the intentional public API break obvious.
 
 0.04  2026-10-04
