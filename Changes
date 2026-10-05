@@ -1,5 +1,22 @@
 Revision history for Unblock-HTTP2
 
+0.10  2026-10-04
+    - Make a deliberate breaking API harmonization pass across Unblock::HTTP2.
+    - Rename Transaction->inform() to Transaction->send_informational().
+      No compatibility alias is provided.
+    - Add Transaction->is_error() so the common transaction lifecycle
+      vocabulary includes state(), error(), is_complete(), is_cancelled(),
+      is_error(), and is_terminal().
+    - Normalize NativeABI discovery with definition(), native_include_dir(),
+      header_path(), and c_header().
+    - Install the public HTTP/2 native ABI header and report struct_size in the
+      Perl discovery definition.
+    - Build the XS native transport implementation against that same public
+      header so the installed declaration and compiled layout stay in sync.
+    - Update introductory examples and integration documentation to use the
+      common Unblock HTTP API vocabulary.
+    - Jump from 0.04 to 0.10 to make the intentional public API break obvious.
+
 0.04  2026-10-04
     - Add Unblock::HTTP2::NativeABI for XS-backed transports.
     - Accept borrowed native input buffers directly on both Client and Server,
