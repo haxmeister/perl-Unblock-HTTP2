@@ -87,6 +87,35 @@ jobs:
           "$MAKE" distcheck
           "$MAKE" disttest
 
+      - name: Check installed NativeABI
+        if: runner.os == 'Linux' && matrix.perl == 'latest'
+        shell: bash
+        run: |
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE" dist
+
+          DIST="$PWD/Unblock-HTTP2-0.10.tar.gz"
+          test -f "$DIST"
+
+          WORK="$RUNNER_TEMP/unblock-http2-nativeabi-dist"
+          INSTALL="$RUNNER_TEMP/unblock-http2-nativeabi-install"
+
+          rm -rf "$WORK" "$INSTALL"
+          mkdir -p "$WORK" "$INSTALL"
+
+          tar -xzf "$DIST" -C "$WORK"
+          cd "$WORK/Unblock-HTTP2-0.10"
+
+          perl Makefile.PL INSTALL_BASE="$INSTALL"
+          "$MAKE"
+          "$MAKE" install
+
+          ARCH=$(perl -MConfig -e 'print $Config{archname}')
+          export PERL5LIB="$INSTALL/lib/perl5:$INSTALL/lib/perl5/$ARCH"
+
+          cd "$GITHUB_WORKSPACE"
+          UNBLOCK_HTTP2_INSTALL_ROOT="$INSTALL" perl xt/installed-nativeabi.t
+
       - name: Check POD syntax
         if: runner.os != 'Windows'
         shell: bash
