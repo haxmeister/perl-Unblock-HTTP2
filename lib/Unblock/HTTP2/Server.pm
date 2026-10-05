@@ -706,6 +706,8 @@ Request callbacks are:
 C<on_request> runs when the request headers have been accepted.
 C<on_request_end> runs after the complete request and any trailers have
 arrived. C<$error_code> can be undefined when there is no HTTP/2 reset code.
+C<$transaction> can be undefined for an error that occurs before a Transaction
+exists.
 
 Use C<send_informational()> for informational responses and C<respond()> for
 the final response.
