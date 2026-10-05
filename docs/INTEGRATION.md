@@ -47,11 +47,14 @@ Use:
 
 ```perl
 my $definition = Unblock::HTTP2::NativeABI::definition();
+my $include_dir = Unblock::HTTP2::NativeABI::native_include_dir();
+my $header_path = Unblock::HTTP2::NativeABI::header_path();
 my $header = Unblock::HTTP2::NativeABI::c_header();
 ```
 
-The definition provides the ABI version and the address of the native
-operations table.
+The definition provides the ABI version, structure size, and address of the
+native operations table. The other discovery methods expose the installed
+header through the common Unblock HTTP NativeABI vocabulary.
 
 An XS adapter should create one native context for each Client or Server and
 keep it for the lifetime of that HTTP/2 connection.
