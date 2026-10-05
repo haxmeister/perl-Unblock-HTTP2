@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP2
 
-Next
+0.04  2026-10-04
     - Add Unblock::HTTP2::NativeABI for XS-backed transports.
     - Accept borrowed native input buffers directly on both Client and Server,
       avoiding the transport-side Perl byte-scalar materialization.
