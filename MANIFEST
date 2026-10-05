@@ -7,8 +7,10 @@ README.md
 docs/ARCHITECTURE.md
 docs/BACKEND-REQUIREMENTS.md
 docs/FEATURE-COMPLETENESS.md
+docs/INTEGRATION.md
 lib/Unblock/HTTP2.pm
 lib/Unblock/HTTP2/Client.pm
+lib/Unblock/HTTP2/NativeABI.pm
 lib/Unblock/HTTP2/Server.pm
 lib/Unblock/HTTP2/Transaction.pm
 lib/Unblock/HTTP2/_Connection.pm
@@ -41,4 +43,5 @@ t/39-goaway-control.t
 t/40-fatal-session-errors.t
 t/41-uniform-fastpath.t
 t/42-transaction-api.t
+t/43-native-transport-abi.t
 t/lib/Test/UnblockHTTP2.pm

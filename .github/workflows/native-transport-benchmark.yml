@@ -1,0 +1,91 @@
+name: native-transport-benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Perl
+        uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: latest
+
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev pkg-config
+          cpanm --notest Alien::nghttp2
+          cpanm --notest Uniform::HTTP@0.06
+          cpanm --notest --installdeps .
+
+      - name: Build
+        shell: bash
+        run: |
+          perl Makefile.PL
+          MAKE=$(perl -MConfig -e 'print $Config{make}')
+          "$MAKE"
+
+      - name: Run alternating samples
+        shell: bash
+        run: |
+          : > native-transport-results.txt
+
+          run_mode() {
+            BENCH_MODE="$1" \
+              PERL5LIB="$PWD/blib/lib:$PWD/blib/arch:$PERL5LIB" \
+              perl xt/benchmark-native-transport.pl |
+              tee -a native-transport-results.txt
+          }
+
+          for round in $(seq 1 7); do
+            if [ $((round % 2)) -eq 1 ]; then
+              run_mode portable
+              run_mode native
+            else
+              run_mode native
+              run_mode portable
+            fi
+          done
+
+      - name: Summarize benchmark
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import statistics
+          from pathlib import Path
+
+          grouped = {}
+          for line in Path("native-transport-results.txt").read_text().splitlines():
+              if not line.startswith("RESULT "):
+                  continue
+              fields = dict(item.split("=", 1) for item in line.split()[1:])
+              grouped.setdefault(fields["mode"], []).append(float(fields["rate"]))
+
+          medians = {}
+          for mode in ("portable", "native"):
+              values = grouped[mode]
+              median = statistics.median(values)
+              mean = statistics.mean(values)
+              stdev = statistics.stdev(values) if len(values) > 1 else 0.0
+              medians[mode] = median
+              print(
+                  f"{mode:8s} median={median:,.1f}/s "
+                  f"mean={mean:,.1f}/s stdev={stdev:,.1f} "
+                  f"samples={len(values)}"
+              )
+
+          portable = medians["portable"]
+          native = medians["native"]
+          change = (native / portable - 1.0) * 100.0
+          print(
+              f"CHANGE: {change:+.2f}% "
+              f"({native / portable:.3f}x, "
+              f"{portable:,.1f}/s -> {native:,.1f}/s)"
+          )
+          PY

@@ -1,6 +1,13 @@
 Revision history for Unblock-HTTP2
 
 Next
+    - Add Unblock::HTTP2::NativeABI for XS-backed transports.
+    - Accept borrowed native input buffers directly on both Client and Server,
+      avoiding the transport-side Perl byte-scalar materialization.
+    - Add native output draining so libnghttp2 output can be copied directly
+      into a transport-owned native queue without an intermediate Perl string.
+    - Support native output pause-after-accept semantics for transport
+      backpressure while keeping the portable input()/output() API unchanged.
     - Require Uniform::HTTP 0.06 for its header-only native C ABI.
     - Inspect exact canonical outgoing Request and Response objects directly
       from XS without allocating a Perl FastPath view.

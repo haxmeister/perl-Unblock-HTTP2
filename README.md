@@ -41,7 +41,7 @@ Unblock::HTTP2 0.03 requires Perl 5.16 or newer.
 The distribution uses:
 
 ```text
-Uniform::HTTP  0.05+
+Uniform::HTTP  0.06+
 Alien::nghttp2 0.003+
 ```
 
@@ -79,6 +79,16 @@ while ($engine->want_write) {
     $transport->write($bytes);
 }
 ```
+
+XS-backed transports can optionally use `Unblock::HTTP2::NativeABI`.
+It accepts borrowed native input buffers directly and can drain generated
+nghttp2 output through a native sink callback. The transport keeps ownership of
+input storage, and outbound buffers are borrowed only for the duration of the
+sink callback. Client and Server use the same ABI.
+
+The normal `input()` and `output()` methods remain the portable path.
+See `docs/INTEGRATION.md` for the native transport contract and ownership
+rules.
 
 Unblock::HTTP2 never waits for network activity itself.
 

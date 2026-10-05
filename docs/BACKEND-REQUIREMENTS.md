@@ -112,9 +112,14 @@ The private binding must continue to work with:
 Native callbacks that use Perl APIs must establish the correct interpreter
 context.
 
-Outgoing protocol bytes are returned directly from
-`nghttp2_session_mem_send`; the binding does not maintain a second transport
-send queue.
+The portable output path returns protocol bytes from
+`nghttp2_session_mem_send` as a Perl byte string. The optional NativeABI can
+instead pass each borrowed nghttp2 output window directly to a native transport
+sink. The sink must consume or copy the window before returning. The binding
+does not maintain a second transport send queue.
+
+The optional NativeABI also accepts borrowed contiguous input windows. It must
+never retain the caller's input pointer after the native input call returns.
 
 ## Reentrancy
 

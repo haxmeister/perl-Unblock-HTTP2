@@ -234,7 +234,14 @@ object directly. Adapters and subclasses continue through the portable Perl
 message path.
 
 The Perl layer still owns the public API, portable message mapping, transaction
-objects, and transport boundary.
+objects, and transport policy.
+
+The optional `Unblock::HTTP2::NativeABI` exposes the same engine to XS-backed
+transports without requiring a Perl byte scalar at the transport boundary.
+Borrowed input is passed directly to libnghttp2. Outbound libnghttp2 buffers can
+be copied directly into a native transport queue through a short-lived sink
+callback. The ABI does not expose the private nghttp2 session or move HTTP/2
+state into the transport.
 
 ## Integration
 
