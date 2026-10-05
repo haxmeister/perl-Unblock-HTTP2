@@ -3,7 +3,7 @@ package Unblock::HTTP2;
 use strict;
 use warnings;
 
-our $VERSION = '0.04';
+our $VERSION = '0.10';
 
 use constant {
     NO_ERROR            => 0,
