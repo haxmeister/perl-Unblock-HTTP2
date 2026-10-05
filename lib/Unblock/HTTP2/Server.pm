@@ -685,21 +685,30 @@ C<output()> while C<want_write()> is true.
 C<new()> accepts an initial C<settings> hash, C<max_concurrent_streams>,
 C<max_header_list_size>, and C<enable_connect_protocol>.
 
-Connection callbacks include C<on_settings>, C<on_settings_ack>, C<on_ping>,
-C<on_ping_ack>, C<on_priority>, and C<on_invalid_frame>.
+Connection callbacks are:
+
+    on_settings($server, $peer_settings, $changed_settings)
+    on_settings_ack($server, $acked_settings)
+    on_ping($server, $opaque)
+    on_ping_ack($server, $opaque)
+    on_priority($server, $stream_id, $field_value)
+    on_invalid_frame($server, $frame, $lib_error_code)
 
 =head1 REQUEST CALLBACKS
 
+Request callbacks are:
+
+    on_request($transaction, $request)
+    on_body($transaction, $request, $bytes)
+    on_request_end($transaction, $request)
+    on_error($transaction, $error, $error_code)
+
 C<on_request> runs when the request headers have been accepted.
-
-C<on_body> receives body chunks.
-
 C<on_request_end> runs after the complete request and any trailers have
-arrived.
+arrived. C<$error_code> can be undefined when there is no HTTP/2 reset code.
 
-The callback receives an L<Unblock::HTTP2::Transaction>. Use
-C<send_informational()> for informational responses and C<respond()> for the
-final response.
+Use C<send_informational()> for informational responses and C<respond()> for
+the final response.
 
 =head1 CONNECTION CONTROL
 
