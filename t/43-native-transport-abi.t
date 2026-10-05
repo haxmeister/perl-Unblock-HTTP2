@@ -11,17 +11,23 @@ use Unblock::HTTP2::_nghttp2;
 
 my $definition = Unblock::HTTP2::NativeABI::definition();
 is $definition->{abi_version}, 1, 'native transport ABI version is 1';
+ok $definition->{struct_size},
+    'native transport ABI exposes its structure size';
 ok $definition->{operations_address},
     'native transport ABI exposes operations table';
 
-like Unblock::HTTP2::NativeABI::c_header(),
-    qr/ub_http2_native_ops_v1/,
-    'native transport ABI publishes its C layout';
-like Unblock::HTTP2::NativeABI::c_header(),
-    qr/ub_http2_output_sink_v1/,
-    'native transport ABI publishes the output sink contract';
+my $include_dir = Unblock::HTTP2::NativeABI::native_include_dir();
+ok -d $include_dir, 'native transport ABI exposes an installed include directory';
+my $header_path = Unblock::HTTP2::NativeABI::header_path();
+ok -f $header_path, 'native transport ABI exposes an installed header path';
 
 my $header = Unblock::HTTP2::NativeABI::c_header();
+like $header,
+    qr/ub_http2_native_ops_v1/,
+    'native transport ABI publishes its C layout';
+like $header,
+    qr/ub_http2_output_sink_v1/,
+    'native transport ABI publishes the output sink contract';
 my @common_order = map { index($header, $_) }
     ('void *(*create)', 'int (*input)', 'int (*eof)', 'void (*destroy)');
 ok $common_order[0] < $common_order[1]
