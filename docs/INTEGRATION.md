@@ -56,6 +56,9 @@ The definition provides the ABI version, structure size, and address of the
 native operations table. The other discovery methods expose the installed
 header and its include directory.
 
+A native consumer must check both `abi_version` and `struct_size` before
+dereferencing the operations table.
+
 An XS adapter should create one native context for each Client or Server and
 keep it for the lifetime of that HTTP/2 connection.
 
