@@ -78,6 +78,12 @@ The sink can return the pause result after accepting a chunk. This stops the
 current drain without losing that chunk. Resume output when the transport can
 accept more data.
 
+An event transport should normally append these chunks to its existing native
+send queue. A sink callback is not intended to imply one network syscall per
+nghttp2 chunk. The purpose of this path is to copy directly from nghttp2 into
+transport-owned native storage instead of first building an intermediate Perl
+output string.
+
 ## What stays in Unblock
 
 Using the native transport ABI does not move HTTP/2 behavior into the adapter.
