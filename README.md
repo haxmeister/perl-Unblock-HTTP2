@@ -59,8 +59,8 @@ The public API is built around three objects:
 HTTP messages are normal `Uniform::HTTP::Request` and
 `Uniform::HTTP::Response` objects.
 
-The application-facing exchange object is a `Transaction`. The common
-application vocabulary intentionally matches the other Unblock HTTP engines:
+The application-facing exchange object is a `Transaction`. Its main
+application vocabulary is intentionally small and consistent:
 `Client->new`, `Server->new`, `request()`, `respond()`, `write()`,
 `end()`, and `send_informational()`. HTTP/2 protocol terms such as stream
 ID, RST_STREAM, stream flow control, and MAX_CONCURRENT_STREAMS keep their RFC
