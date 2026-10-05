@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP2
 ```
 
-Unblock::HTTP2 0.04 requires Perl 5.16 or newer.
+Unblock::HTTP2 0.10 requires Perl 5.16 or newer.
 
 The distribution uses:
 
@@ -59,9 +59,12 @@ The public API is built around three objects:
 HTTP messages are normal `Uniform::HTTP::Request` and
 `Uniform::HTTP::Response` objects.
 
-The application-facing exchange object is a `Transaction`. HTTP/2 protocol
-terms such as stream ID, RST_STREAM, stream flow control, and
-MAX_CONCURRENT_STREAMS keep their RFC names.
+The application-facing exchange object is a `Transaction`. The common
+application vocabulary intentionally matches the other Unblock HTTP engines:
+`Client->new`, `Server->new`, `request()`, `respond()`, `write()`,
+`end()`, and `send_informational()`. HTTP/2 protocol terms such as stream
+ID, RST_STREAM, stream flow control, and MAX_CONCURRENT_STREAMS keep their RFC
+names.
 
 Canonical Uniform::HTTP 0.06 messages use its native C ABI directly. The XS
 binding inspects outgoing canonical objects without a Perl FastPath view and
@@ -87,6 +90,9 @@ input storage, and outbound buffers are borrowed only for the duration of the
 sink callback. Client and Server use the same ABI.
 
 The normal `input()` and `output()` methods remain the portable path.
+Native integrations can discover the installed ABI with `definition()`,
+`native_include_dir()`, `header_path()`, and `c_header()`.
+
 See `docs/INTEGRATION.md` for the native transport contract and ownership
 rules.
 
@@ -193,7 +199,7 @@ Unblock sends them as HTTP/2 trailing HEADERS.
 A server can send an informational response before the final response:
 
 ```perl
-$transaction->inform(
+$transaction->send_informational(
     Uniform::HTTP::Response->new(
         status => 103,
     ),
@@ -332,7 +338,7 @@ included in the CPAN distribution.
 
 ## Status
 
-Unblock::HTTP2 0.04 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.10 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 engine.
 
 Future work can focus on bug fixes, interoperability, performance, or optional
