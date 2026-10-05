@@ -15,6 +15,10 @@ Revision history for Unblock-HTTP2
       header so the installed declaration and compiled layout stay in sync.
     - Review README, public POD, and docs for the 0.10 API, including callback
       signatures, NativeABI discovery, and an explicit upgrade note.
+    - Add a staged-install regression test that builds the generated
+      distribution, loads NativeABI from the installed copy, verifies the
+      installed header and discovery values, and compiles an external C
+      consumer against that header.
     - Jump from 0.04 to 0.10 to make the intentional public API break obvious.
 
 0.04  2026-10-04
