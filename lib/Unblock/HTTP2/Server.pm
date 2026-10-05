@@ -9,7 +9,7 @@ use parent 'Unblock::HTTP2::_Connection';
 use Unblock::HTTP2::_Headers;
 use Unblock::HTTP2::Transaction;
 
-our $VERSION = '0.04';
+our $VERSION = '0.10';
 
 use constant {
     H2_DATA              => 0,
@@ -325,28 +325,28 @@ sub _on_invalid_frame {
     return 0;
 }
 
-sub _inform_stream {
+sub _send_informational_stream {
     my ($self, $transaction, $response) = @_;
 
     my $native_message = Unblock::HTTP2::_Headers->native_message($response);
-    croak 'inform(): requires the Uniform HTTP response contract'
+    croak 'send_informational(): requires the Uniform HTTP response contract'
         unless $native_message
             || Unblock::HTTP2::_Headers::_response_contract($response);
-    croak 'inform(): final Response already submitted'
+    croak 'send_informational(): final Response already submitted'
         if $transaction->response;
 
     my $status = $response->status;
-    croak 'inform(): status must be informational (100-199, excluding 101)'
+    croak 'send_informational(): status must be informational (100-199, excluding 101)'
         unless defined($status) && !ref($status)
             && $status =~ /\A[0-9]+\z/
             && $status >= 100 && $status < 200 && $status != 101;
-    croak 'inform(): informational Response must not have a buffered body'
+    croak 'send_informational(): informational Response must not have a buffered body'
         if $response->has_buffered_body;
 
     my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
         'inform()', $response,
     );
-    croak 'inform(): informational Response must not have trailers'
+    croak 'send_informational(): informational Response must not have trailers'
         if @$trailers;
 
     if ($native_message) {
