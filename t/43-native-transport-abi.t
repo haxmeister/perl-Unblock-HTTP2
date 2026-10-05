@@ -132,6 +132,36 @@ sub pump_native {
 
 pump_native();
 
+sub transfer_direct {
+    my ($from_driver, $to_driver) = @_;
+    return 0 unless $from_driver->want_write;
+
+    my ($output_status, $input_status, $moved) =
+        $from_driver->transfer_to($to_driver);
+
+    is $output_status, Unblock::HTTP2::NativeABI::OUTPUT_OK(),
+        'direct native bridge drains output';
+    is $input_status, Unblock::HTTP2::NativeABI::INPUT_OK(),
+        'direct native bridge feeds destination input';
+    return $moved;
+}
+
+sub pump_direct {
+    my ($until) = @_;
+    my $turns = 0;
+
+    for (;;) {
+        my $moved = 0;
+        $moved += transfer_direct($client_driver, $server_driver);
+        $moved += transfer_direct($server_driver, $client_driver);
+
+        last if $until && $until->();
+        last unless $moved;
+        die 'direct native transport pump did not settle'
+            if ++$turns > 10_000;
+    }
+}
+
 my $transaction = $client->request(
     Uniform::HTTP::Request->new(
         method    => 'POST',
@@ -156,7 +186,7 @@ my $transaction = $client->request(
     },
 );
 
-pump_native(sub { $complete });
+pump_direct(sub { $complete });
 
 ok $complete, 'native transport completes an HTTP/2 transaction';
 isa_ok $request_seen, 'Uniform::HTTP::Request';
@@ -180,7 +210,7 @@ is $pause_produced, length($pause_bytes),
     'paused native output reports the accepted chunk';
 ok length($pause_bytes), 'paused native output produces a chunk';
 feed_native($server_driver, $pause_bytes, 0);
-pump_native();
+pump_direct();
 
 my $eof_status = $server_driver->eof;
 is $eof_status, Unblock::HTTP2::NativeABI::INPUT_CLOSED(),
