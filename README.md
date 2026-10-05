@@ -87,6 +87,8 @@ input storage, and outbound buffers are borrowed only for the duration of the
 sink callback. Client and Server use the same ABI.
 
 The normal `input()` and `output()` methods remain the portable path.
+See `docs/INTEGRATION.md` for the native transport contract and ownership
+rules.
 
 Unblock::HTTP2 never waits for network activity itself.
 
