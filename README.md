@@ -38,6 +38,10 @@ cpanm Unblock::HTTP2
 
 Unblock::HTTP2 0.10 requires Perl 5.16 or newer.
 
+Version 0.10 intentionally breaks the earlier 0.04 API:
+`Transaction->inform()` was replaced by `Transaction->send_informational()`.
+There is no compatibility alias.
+
 The distribution uses:
 
 ```text
@@ -331,6 +335,7 @@ included in the CPAN distribution.
 - `Unblock::HTTP2::Client` - client connection API
 - `Unblock::HTTP2::Server` - server connection API
 - `Unblock::HTTP2::Transaction` - per-transaction API
+- `Unblock::HTTP2::NativeABI` - optional native transport ABI
 - `docs/ARCHITECTURE.md` - ownership and data flow
 - `docs/FEATURE-COMPLETENESS.md` - release scope and deliberate exclusions
 - `docs/BACKEND-REQUIREMENTS.md` - private libnghttp2 binding contract
