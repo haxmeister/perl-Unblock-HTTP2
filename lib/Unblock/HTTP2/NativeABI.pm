@@ -63,6 +63,10 @@ typedef struct ub_http2_native_ops_v1_s {
         size_t *consumed
     );
 
+    int (*eof)(pTHX_ void *context);
+
+    void (*destroy)(pTHX_ void *context);
+
     int (*output)(
         pTHX_
         void *context,
@@ -73,9 +77,6 @@ typedef struct ub_http2_native_ops_v1_s {
 
     int (*want_read)(pTHX_ void *context);
     int (*want_write)(pTHX_ void *context);
-    int (*eof)(pTHX_ void *context);
-
-    void (*destroy)(pTHX_ void *context);
 } ub_http2_native_ops_v1;
 
 #endif
@@ -132,6 +133,10 @@ layout.
 
 Consumers must check both C<abi_version> and C<struct_size> before
 dereferencing operations.
+
+The initial C<create>, C<input>, C<eof>, and C<destroy> operation layout is
+intentionally parallel to C<Unblock::HTTP1::NativeABI> version 1. HTTP/2 then
+appends its native output and readiness operations.
 
 C<create> receives one Unblock::HTTP2 Client or Server object and returns a
 connection-local native context. Keep that context for the lifetime of the
