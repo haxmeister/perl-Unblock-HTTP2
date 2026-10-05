@@ -15,9 +15,9 @@ my @errors;
 
 my $server = Unblock::HTTP2::Server->new(
     on_request => sub {
-        my ($stream, $request) = @_;
+        my ($transaction, $request) = @_;
 
-        $stream->inform(
+        $transaction->send_informational(
             Uniform::HTTP::Response->new(
                 status  => 103,
                 headers => [
@@ -26,7 +26,7 @@ my $server = Unblock::HTTP2::Server->new(
             ),
         );
 
-        $stream->inform(
+        $transaction->send_informational(
             Uniform::HTTP::Response->new(
                 status  => 103,
                 headers => [
@@ -35,7 +35,7 @@ my $server = Unblock::HTTP2::Server->new(
             ),
         );
 
-        $stream->respond(
+        $transaction->respond(
             Uniform::HTTP::Response->new(
                 status => 200,
                 body   => 'ok',
@@ -44,14 +44,14 @@ my $server = Unblock::HTTP2::Server->new(
     },
 
     on_error => sub {
-        my ($stream, $error) = @_;
+        my ($transaction, $error) = @_;
         push @errors, "server: $error";
     },
 );
 
 my $client = Unblock::HTTP2::Client->new;
 
-my $stream = $client->request(
+my $transaction = $client->request(
     Uniform::HTTP::Request->new(
         method    => 'GET',
         target    => '/',
@@ -60,22 +60,22 @@ my $stream = $client->request(
     ),
 
     on_informational => sub {
-        my ($stream, $response) = @_;
+        my ($transaction, $response) = @_;
         push @informational, $response;
     },
 
     on_response => sub {
-        my ($stream, $response) = @_;
+        my ($transaction, $response) = @_;
         $final = $response;
     },
 
     on_error => sub {
-        my ($stream, $error) = @_;
+        my ($transaction, $error) = @_;
         push @errors, "client: $error";
     },
 );
 
-pump_until($client, $server, sub { $stream->is_terminal });
+pump_until($client, $server, sub { $transaction->is_terminal });
 
 is scalar(@informational), 2,
     'multiple non-final informational responses are delivered';
