@@ -2483,6 +2483,42 @@ ub_http2_test_output_sink(
         : UB_HTTP2_OUTPUT_CONTINUE;
 }
 
+typedef struct {
+    ub_http2_native_context *destination;
+    size_t moved;
+    int input_status;
+} ub_http2_test_bridge_context;
+
+static int
+ub_http2_test_bridge_sink(
+    pTHX_
+    void *opaque,
+    const char *data,
+    size_t length)
+{
+    ub_http2_test_bridge_context *bridge =
+        (ub_http2_test_bridge_context *)opaque;
+    size_t consumed = 0;
+
+    if (!bridge || !bridge->destination) {
+        return UB_HTTP2_OUTPUT_ERROR;
+    }
+
+    bridge->input_status = ub_http2_native_input(
+        aTHX_
+        bridge->destination,
+        data,
+        length,
+        &consumed
+    );
+    if (consumed != length) {
+        return UB_HTTP2_OUTPUT_ERROR;
+    }
+
+    bridge->moved += consumed;
+    return UB_HTTP2_OUTPUT_CONTINUE;
+}
+
 
 MODULE = Unblock::HTTP2    PACKAGE = Unblock::HTTP2::_nghttp2
 
