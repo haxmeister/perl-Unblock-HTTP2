@@ -30,6 +30,7 @@ The 0.03 core includes:
 - safe handling of unknown extension frame types
 - fatal session failure reporting
 - Uniform::HTTP 0.06 native C path for canonical messages
+- versioned native transport ABI for borrowed input and native output draining
 
 HTTP messages use Uniform::HTTP 0.06. Exact canonical Uniform messages use the
 native C ABI for direct inspection and validated construction. Adapters and
