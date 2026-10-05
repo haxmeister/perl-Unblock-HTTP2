@@ -2694,57 +2694,6 @@ mem_send(self)
     OUTPUT:
         RETVAL
 
-void
-transfer_to(self, destination)
-        SV *self
-        SV *destination
-    PREINIT:
-        SV *inner;
-        SV *destination_inner;
-        ub_http2_native_context *context;
-        ub_http2_native_context *destination_context;
-        ub_http2_test_bridge_context bridge;
-        size_t produced = 0;
-        int output_status;
-    PPCODE:
-        if (!SvROK(self)
-            || !sv_derived_from(
-                self, "Unblock::HTTP2::_nghttp2::NativeDriver")
-            || !SvROK(destination)
-            || !sv_derived_from(
-                destination, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
-            croak("transfer_to requires two HTTP/2 native transport drivers");
-        }
-
-        inner = SvRV(self);
-        destination_inner = SvRV(destination);
-        context = INT2PTR(
-            ub_http2_native_context *, SvIV(inner));
-        destination_context = INT2PTR(
-            ub_http2_native_context *, SvIV(destination_inner));
-        if (!context || !destination_context) {
-            croak("native transport driver has already been released");
-        }
-
-        bridge.destination = destination_context;
-        bridge.moved = 0;
-        bridge.input_status = UB_HTTP2_INPUT_OK;
-
-        output_status = ub_http2_native_output(
-            aTHX_
-            context,
-            ub_http2_test_bridge_sink,
-            &bridge,
-            &produced
-        );
-        if (produced != bridge.moved) {
-            croak("native transport bridge byte count mismatch");
-        }
-
-        XPUSHs(sv_2mortal(newSViv(output_status)));
-        XPUSHs(sv_2mortal(newSViv(bridge.input_status)));
-        XPUSHs(sv_2mortal(newSVuv((UV)bridge.moved)));
-
 int
 want_read(self)
         SV *self
@@ -3447,6 +3396,57 @@ drain(self, pause_after_first = 0)
         XPUSHs(sv_2mortal(newSViv(status)));
         XPUSHs(sv_2mortal(output));
         XPUSHs(sv_2mortal(newSVuv((UV)produced)));
+
+void
+transfer_to(self, destination)
+        SV *self
+        SV *destination
+    PREINIT:
+        SV *inner;
+        SV *destination_inner;
+        ub_http2_native_context *context;
+        ub_http2_native_context *destination_context;
+        ub_http2_test_bridge_context bridge;
+        size_t produced = 0;
+        int output_status;
+    PPCODE:
+        if (!SvROK(self)
+            || !sv_derived_from(
+                self, "Unblock::HTTP2::_nghttp2::NativeDriver")
+            || !SvROK(destination)
+            || !sv_derived_from(
+                destination, "Unblock::HTTP2::_nghttp2::NativeDriver")) {
+            croak("transfer_to requires two HTTP/2 native transport drivers");
+        }
+
+        inner = SvRV(self);
+        destination_inner = SvRV(destination);
+        context = INT2PTR(
+            ub_http2_native_context *, SvIV(inner));
+        destination_context = INT2PTR(
+            ub_http2_native_context *, SvIV(destination_inner));
+        if (!context || !destination_context) {
+            croak("native transport driver has already been released");
+        }
+
+        bridge.destination = destination_context;
+        bridge.moved = 0;
+        bridge.input_status = UB_HTTP2_INPUT_OK;
+
+        output_status = ub_http2_native_output(
+            aTHX_
+            context,
+            ub_http2_test_bridge_sink,
+            &bridge,
+            &produced
+        );
+        if (produced != bridge.moved) {
+            croak("native transport bridge byte count mismatch");
+        }
+
+        XPUSHs(sv_2mortal(newSViv(output_status)));
+        XPUSHs(sv_2mortal(newSViv(bridge.input_status)));
+        XPUSHs(sv_2mortal(newSVuv((UV)bridge.moved)));
 
 int
 want_read(self)
