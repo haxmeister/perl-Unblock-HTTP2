@@ -7,6 +7,7 @@ README.md
 docs/ARCHITECTURE.md
 docs/BACKEND-REQUIREMENTS.md
 docs/FEATURE-COMPLETENESS.md
+docs/INTEGRATION.md
 lib/Unblock/HTTP2.pm
 lib/Unblock/HTTP2/Client.pm
 lib/Unblock/HTTP2/NativeABI.pm
