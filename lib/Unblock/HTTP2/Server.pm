@@ -697,8 +697,9 @@ C<on_body> receives body chunks.
 C<on_request_end> runs after the complete request and any trailers have
 arrived.
 
-The callback receives an L<Unblock::HTTP2::Transaction>. Use C<inform()> for
-informational responses and C<respond()> for the final response.
+The callback receives an L<Unblock::HTTP2::Transaction>. Use
+C<send_informational()> for informational responses and C<respond()> for the
+final response.
 
 =head1 CONNECTION CONTROL
 
