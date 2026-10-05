@@ -2,6 +2,7 @@ use strict;
 use warnings;
 use Test::More;
 
+use Uniform::HTTP::Request;
 use Unblock::HTTP2::Client;
 use Unblock::HTTP2::Server;
 
@@ -40,6 +41,17 @@ use Unblock::HTTP2::Server;
 
 {
     my $client = Unblock::HTTP2::Client->new;
+    my $transaction = $client->request(
+        Uniform::HTTP::Request->new(
+            method    => 'GET',
+            target    => '/',
+            scheme    => 'https',
+            authority => 'example.test',
+        ),
+    );
+
+    ok !$transaction->is_error,
+        'active transaction is not in error state';
 
     is $client->close('transport closed'), $client,
         'explicit close remains chainable';
@@ -47,6 +59,13 @@ use Unblock::HTTP2::Server;
         'explicit close marks engine closed';
     is $client->close_reason, 'transport closed',
         'explicit close reason is retained';
+
+    ok $transaction->is_error,
+        'connection failure moves an active transaction to error state';
+    is $transaction->state, 'error',
+        'failed transaction exposes the error state';
+    is $transaction->error, 'transport closed',
+        'failed transaction preserves the connection failure reason';
 }
 
 done_testing;
