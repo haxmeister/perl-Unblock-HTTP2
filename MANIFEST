@@ -11,6 +11,7 @@ docs/INTEGRATION.md
 lib/Unblock/HTTP2.pm
 lib/Unblock/HTTP2/Client.pm
 lib/Unblock/HTTP2/NativeABI.pm
+lib/Unblock/HTTP2/NativeABI/unblock_http2_native_abi.h
 lib/Unblock/HTTP2/Server.pm
 lib/Unblock/HTTP2/Transaction.pm
 lib/Unblock/HTTP2/_Connection.pm
