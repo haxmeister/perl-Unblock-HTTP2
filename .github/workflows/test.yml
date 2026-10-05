@@ -103,5 +103,6 @@ jobs:
         run: |
           podchecker lib/Unblock/HTTP2.pm
           podchecker lib/Unblock/HTTP2/Client.pm
+          podchecker lib/Unblock/HTTP2/NativeABI.pm
           podchecker lib/Unblock/HTTP2/Server.pm
           podchecker lib/Unblock/HTTP2/Transaction.pm
