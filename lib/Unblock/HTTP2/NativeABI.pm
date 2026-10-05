@@ -3,6 +3,9 @@ package Unblock::HTTP2::NativeABI;
 use strict;
 use warnings;
 
+use File::Basename qw(dirname);
+use File::Spec ();
+
 use Unblock::HTTP2 ();
 use Unblock::HTTP2::_nghttp2 ();
 
@@ -18,75 +21,43 @@ use constant OUTPUT_CONTINUE  => 0;
 use constant OUTPUT_PAUSE     => 1;
 use constant OUTPUT_ERROR     => -1;
 
-sub c_header {
-    return <<'END_C_HEADER';
-#ifndef UNBLOCK_HTTP2_NATIVE_ABI_H
-#define UNBLOCK_HTTP2_NATIVE_ABI_H
-
-#include "EXTERN.h"
-#include "perl.h"
-#include <stddef.h>
-#include <stdint.h>
-
-#define UB_HTTP2_NATIVE_ABI_VERSION 1U
-
-#define UB_HTTP2_INPUT_OK      0
-#define UB_HTTP2_INPUT_MORE    1
-#define UB_HTTP2_INPUT_CLOSED  3
-
-#define UB_HTTP2_OUTPUT_OK      0
-#define UB_HTTP2_OUTPUT_CLOSED  3
-
-#define UB_HTTP2_OUTPUT_CONTINUE 0
-#define UB_HTTP2_OUTPUT_PAUSE    1
-#define UB_HTTP2_OUTPUT_ERROR   -1
-
-typedef int (*ub_http2_output_sink_v1)(
-    pTHX_
-    void *sink_context,
-    const char *data,
-    size_t length
+my $include_dir = File::Spec->catdir(
+    dirname(__FILE__),
+    'NativeABI',
 );
 
-typedef struct ub_http2_native_ops_v1_s {
-    uint32_t abi_version;
-    size_t struct_size;
-    const char *name;
+sub native_include_dir {
+    return $include_dir;
+}
 
-    void *(*create)(pTHX_ SV *engine);
-
-    int (*input)(
-        pTHX_
-        void *context,
-        const char *data,
-        size_t length,
-        size_t *consumed
+sub header_path {
+    return File::Spec->catfile(
+        $include_dir,
+        'unblock_http2_native_abi.h',
     );
+}
 
-    int (*eof)(pTHX_ void *context);
+sub c_header {
+    my $path = header_path();
 
-    void (*destroy)(pTHX_ void *context);
+    open my $fh, '<', $path
+        or die "could not read $path: $!";
 
-    int (*output)(
-        pTHX_
-        void *context,
-        ub_http2_output_sink_v1 sink,
-        void *sink_context,
-        size_t *produced
-    );
+    local $/;
+    my $header = <$fh>;
 
-    int (*want_read)(pTHX_ void *context);
-    int (*want_write)(pTHX_ void *context);
-} ub_http2_native_ops_v1;
+    close $fh
+        or die "could not close $path: $!";
 
-#endif
-END_C_HEADER
+    return $header;
 }
 
 sub definition {
     return {
         provider => \&Unblock::HTTP2::_nghttp2::_native_transport_operations_address,
         abi_version => ABI_VERSION,
+        struct_size =>
+            Unblock::HTTP2::_nghttp2::_native_transport_operations_size(),
         operations_address =>
             Unblock::HTTP2::_nghttp2::_native_transport_operations_address(),
     };
@@ -112,7 +83,7 @@ outbound nghttp2 buffers through a native sink callback.
 The ABI works with both C<Unblock::HTTP2::Client> and
 C<Unblock::HTTP2::Server>.
 
-=head1 DEFINITION
+=head1 DISCOVERY
 
     my $definition = Unblock::HTTP2::NativeABI::definition();
 
@@ -120,23 +91,37 @@ The returned hash contains:
 
     provider
     abi_version
+    struct_size
     operations_address
 
 C<provider> keeps the XS provider loaded and can be called again to obtain the
-current operations address. C<abi_version> is currently 1.
-
-=head1 C ABI
-
-C<c_header()> returns the ABI version 1 C declaration. Build-time adapters may
-write this text to a generated header instead of carrying a private copy of the
-layout.
+current operations address.
 
 Consumers must check both C<abi_version> and C<struct_size> before
 dereferencing operations.
 
-The initial C<create>, C<input>, C<eof>, and C<destroy> operation layout is
-intentionally parallel to C<Unblock::HTTP1::NativeABI> version 1. HTTP/2 then
-appends its native output and readiness operations.
+=head1 HEADER
+
+The installed header is:
+
+    Unblock/HTTP2/NativeABI/unblock_http2_native_abi.h
+
+Its include directory is available through:
+
+    Unblock::HTTP2::NativeABI::native_include_dir()
+
+The complete installed path is available through:
+
+    Unblock::HTTP2::NativeABI::header_path()
+
+C<c_header()> returns the same header text for build systems that prefer to
+generate a private copy.
+
+=head1 C ABI
+
+ABI version 1 begins with C<create>, C<input>, C<eof>, and C<destroy>, matching
+the common Unblock borrowed-input lifecycle. HTTP/2 then appends native output
+and readiness operations.
 
 C<create> receives one Unblock::HTTP2 Client or Server object and returns a
 connection-local native context. Keep that context for the lifetime of the
