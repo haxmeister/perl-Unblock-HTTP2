@@ -2,9 +2,6 @@ name: native-transport-benchmark
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/native-transport-abi
 
 jobs:
   benchmark:
