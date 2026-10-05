@@ -630,8 +630,13 @@ Many request transactions can be active at once.
 C<new()> accepts an initial C<settings> hash, C<max_active_transactions>, and
 C<max_header_list_size>.
 
-Connection callbacks include C<on_settings>, C<on_settings_ack>, C<on_ping>,
-C<on_ping_ack>, and C<on_invalid_frame>.
+Connection callbacks are:
+
+    on_settings($client, $peer_settings, $changed_settings)
+    on_settings_ack($client, $acked_settings)
+    on_ping($client, $opaque)
+    on_ping_ack($client, $opaque)
+    on_invalid_frame($client, $frame, $lib_error_code)
 
 =head1 REQUESTS
 
@@ -642,27 +647,28 @@ Useful callbacks are:
 
 =over 4
 
-=item C<on_response>
+=item C<on_response($transaction, $response)>
 
 Final response headers arrived.
 
-=item C<on_informational>
+=item C<on_informational($transaction, $response)>
 
 An informational response arrived.
 
-=item C<on_body>
+=item C<on_body($transaction, $response, $bytes)>
 
 A response body chunk arrived.
 
-=item C<on_complete>
+=item C<on_complete($transaction)>
 
 The response completed.
 
-=item C<on_error>
+=item C<on_error($transaction, $error, $error_code)>
 
-The transaction failed or its HTTP/2 stream was reset.
+The transaction failed or its HTTP/2 stream was reset. C<$error_code> can be
+undefined when there is no HTTP/2 reset code.
 
-=item C<on_drain>
+=item C<on_drain($transaction)>
 
 A streaming request body can produce more data.
 
