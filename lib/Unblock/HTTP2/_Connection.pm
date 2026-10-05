@@ -6,7 +6,7 @@ use Carp qw(croak);
 use Scalar::Util qw(blessed);
 use utf8 ();
 
-our $VERSION = '0.03';
+our $VERSION = '0.04';
 
 my @SETTING_NAMES = qw(
     header_table_size

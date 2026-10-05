@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP2
 ```
 
-Unblock::HTTP2 0.03 requires Perl 5.16 or newer.
+Unblock::HTTP2 0.04 requires Perl 5.16 or newer.
 
 The distribution uses:
 
@@ -328,10 +328,11 @@ included in the CPAN distribution.
 - `docs/ARCHITECTURE.md` - ownership and data flow
 - `docs/FEATURE-COMPLETENESS.md` - release scope and deliberate exclusions
 - `docs/BACKEND-REQUIREMENTS.md` - private libnghttp2 binding contract
+- `docs/INTEGRATION.md` - portable and native transport integration
 
 ## Status
 
-Unblock::HTTP2 0.03 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.04 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 engine.
 
 Future work can focus on bug fixes, interoperability, performance, or optional
