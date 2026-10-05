@@ -320,6 +320,8 @@ CI covers:
 - current Perl on macOS
 - Strawberry Perl on Windows
 - `distcheck` and `disttest` against the generated distribution
+- a staged-install NativeABI smoke test that compiles an external C consumer
+  against the installed public header
 
 A separate interoperability workflow tests both directions against the stock
 nghttp2 tools:
