@@ -89,7 +89,10 @@ A Transaction tracks:
 - local body production
 - received body credit
 - reset information
-- terminal state
+- terminal state and error
+
+The common lifecycle vocabulary is `state()`, `error()`, `is_complete()`,
+`is_cancelled()`, `is_error()`, and `is_terminal()`.
 
 Many Transactions can be active on one Client or Server connection.
 
@@ -133,7 +136,7 @@ Uniform trailer fields are sent as trailing HEADERS.
 For a streaming local body, trailer fields are snapshotted when `end()` is
 called.
 
-Servers can send one or more informational responses with `inform()` before
+Servers can send one or more informational responses with `send_informational()` before
 the final `respond()`.
 
 ## CONNECT
