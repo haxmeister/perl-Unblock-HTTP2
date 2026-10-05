@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Carp qw(croak);
 
-our $VERSION = '0.04';
+our $VERSION = '0.10';
 
 require XSLoader;
 XSLoader::load('Unblock::HTTP2', $VERSION);
