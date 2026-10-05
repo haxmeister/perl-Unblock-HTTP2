@@ -119,9 +119,8 @@ generate a private copy.
 
 =head1 C ABI
 
-ABI version 1 begins with C<create>, C<input>, C<eof>, and C<destroy>, matching
-the common Unblock borrowed-input lifecycle. HTTP/2 then appends native output
-and readiness operations.
+ABI version 1 begins with C<create>, C<input>, C<eof>, and C<destroy>.
+HTTP/2 then appends native output and readiness operations.
 
 C<create> receives one Unblock::HTTP2 Client or Server object and returns a
 connection-local native context. Keep that context for the lifetime of the
