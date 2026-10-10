@@ -261,6 +261,19 @@ sub resume_output {
     return $self if $self->{transport_finished} || $self->{transport_aborted};
     $self->{transport_blocked} = 0;
     $self->_transport_sync;
+    if (!$self->{transport_blocked} && !$self->{closed}) {
+        # Producers can have paused because the host, rather than their own
+        # stream queue, was congested. Wake only those below low water.
+        for my $id (keys %{ $self->{providers} || {} }) {
+            my $provider = $self->{providers}{$id};
+            next unless $provider->{blocked};
+            next unless length($provider->{queue}) < 32_768;
+            $provider->{blocked} = 0;
+            $self->_queue_drain($id);
+        }
+        $self->_after_session_call;
+        $self->_transport_sync;
+    }
     return $self;
 }
 

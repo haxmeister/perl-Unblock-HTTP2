@@ -576,7 +576,10 @@ sub _write_stream_body {
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
     $provider->{blocked} = 1 if $blocked;
     $self->_transport_sync if $self->{transport_attached};
-    return 0 if $self->{transport_blocked};
+    if ($self->{transport_blocked}) {
+        $provider->{blocked} = 1;
+        return 0;
+    }
     return $blocked ? 0 : 1;
 }
 sub _send_informational_stream {
