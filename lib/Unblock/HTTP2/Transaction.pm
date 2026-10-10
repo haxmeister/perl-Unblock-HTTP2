@@ -4,8 +4,9 @@ use strict;
 use warnings;
 use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
+use Uniform::HTTP::Response;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
 
@@ -88,7 +89,15 @@ sub end {
 }
 
 sub send_informational {
-    my ($self, $response) = @_;
+    my ($self, @arg) = @_;
+    my $response;
+    if (@arg == 1 && ref($arg[0])) {
+        $response = $arg[0];
+    }
+    else {
+        croak 'send_informational(): fields must be key/value pairs' if @arg % 2;
+        $response = Uniform::HTTP::Response->new(@arg);
+    }
     croak 'send_informational(): Transaction is already terminal' if $self->is_terminal;
 
     my $connection = $self->{connection}
@@ -99,7 +108,21 @@ sub send_informational {
 }
 
 sub respond {
-    my ($self, $response, %option) = @_;
+    my ($self, @arg) = @_;
+    my ($response, %option);
+    if (@arg && ref($arg[0])) {
+        $response = shift @arg;
+        croak 'respond(): options must be key/value pairs' if @arg % 2;
+        %option = @arg;
+    }
+    else {
+        croak 'respond(): fields must be key/value pairs' if @arg % 2;
+        my %field = @arg;
+        for my $name (qw(stream_body on_drain on_error)) {
+            $option{$name} = delete $field{$name} if exists $field{$name};
+        }
+        $response = Uniform::HTTP::Response->new(%field);
+    }
     croak 'respond(): Transaction is already terminal' if $self->is_terminal;
 
     my $connection = $self->{connection}

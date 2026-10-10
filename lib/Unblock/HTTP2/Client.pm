@@ -8,8 +8,9 @@ use parent 'Unblock::HTTP2::_Connection';
 
 use Unblock::HTTP2::_Headers;
 use Unblock::HTTP2::Transaction;
+use Uniform::HTTP::Request;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use constant {
     H2_DATA              => 0,
@@ -151,7 +152,25 @@ sub can_open_transaction {
 }
 
 sub request {
-    my ($self, $request, %option) = @_;
+    my ($self, @arg) = @_;
+
+    my ($request, %option);
+    if (@arg && ref($arg[0])) {
+        $request = shift @arg;
+        croak 'request(): options must be key/value pairs' if @arg % 2;
+        %option = @arg;
+    }
+    else {
+        croak 'request(): fields must be key/value pairs' if @arg % 2;
+        my %field = @arg;
+        for my $name (qw(
+            stream_body on_response on_body on_complete on_error
+            on_informational on_drain
+        )) {
+            $option{$name} = delete $field{$name} if exists $field{$name};
+        }
+        $request = Uniform::HTTP::Request->new(%field);
+    }
 
     croak 'request(): connection is closed' if $self->is_closed;
     croak 'request(): connection cannot accept another transaction'
