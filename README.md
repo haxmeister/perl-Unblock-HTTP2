@@ -117,7 +117,8 @@ Native integrations can discover the installed ABI with `definition()`,
 `native_include_dir()`, `header_path()`, and `c_header()`.
 
 Read `perldoc Unblock::HTTP2::Integration`, `docs/INTEGRATION.md`, and
-`docs/COOKBOOK.md` for the framework integration contract and examples.
+`docs/COOKBOOK.md` for the framework integration contract and runnable
+IO::Async, AnyEvent, and Linux::Event examples.
 
 Unblock::HTTP2 never waits for network activity itself.
 

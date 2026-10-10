@@ -21,6 +21,10 @@ lib/Unblock/HTTP2/_Headers.pm
 lib/Unblock/HTTP2/_nghttp2.pm
 nghttp2.xs
 examples/linux-event-server.pl
+examples/io-async-server.pl
+examples/io-async-client.pl
+examples/anyevent-server.pl
+examples/anyevent-client.pl
 t/00-load.t
 t/01-version.t
 t/10-headers.t

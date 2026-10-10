@@ -5,6 +5,17 @@ framework. Most applications only need the first part.
 
 ## Run the example
 
+Complete adapter and application programs are at:
+
+    examples/linux-event-server.pl
+    examples/io-async-server.pl
+    examples/io-async-client.pl
+    examples/anyevent-server.pl
+    examples/anyevent-client.pl
+
+Run the IO::Async server and client in separate terminals, or use the
+AnyEvent pair. Both use cleartext HTTP/2 with prior knowledge.
+
 The Linux::Event server is at:
 
     examples/linux-event-server.pl

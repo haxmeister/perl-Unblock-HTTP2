@@ -8,8 +8,8 @@ Revision history for Unblock-HTTP2
     - Preserve HTTP/2 multiplexing, stream resets, and output backpressure.
     - Support named fields in request(), respond(), and send_informational()
       while keeping canonical Uniform::HTTP messages supported.
-    - Add Integration POD, a cookbook, a Linux::Event example, and
-      regression tests. NativeABI version 1 is unchanged.
+    - Add Integration POD, a cookbook, Linux::Event, IO::Async and AnyEvent
+      examples, and regression tests. NativeABI version 1 is unchanged.
 
 0.10  2026-10-04
     - Make a deliberate breaking API harmonization pass across Unblock::HTTP2.
