@@ -137,4 +137,31 @@ use Unblock::HTTP2::Server;
         'reentrant host failure reports the offending action';
 }
 
+
+{
+    my $client_host = Local::H2Host->new;
+    my $server_host = Local::H2Host->new;
+    my $client = Unblock::HTTP2::Client->new(
+        transport => $client_host,
+        on_settings => sub { die "settings callback exploded\n" },
+    );
+    my $server = Unblock::HTTP2::Server->new(
+        transport => $server_host,
+    );
+    for my $bytes (@{ $server_host->{sent} }) {
+        last if $client->is_closed;
+        $client->input($bytes);
+    }
+
+    ok $client->is_closed, 'control callback exception closes HTTP/2 session';
+    is scalar @{ $client_host->{aborts} }, 1,
+        'control callback exception aborts host immediately';
+    is $client_host->{finishes}, 0,
+        'control callback exception does not perform a graceful finish';
+    like $client_host->{aborts}[0], qr/on_settings callback failed/,
+        'fatal callback error includes the callback name';
+    like $client_host->{aborts}[0], qr/settings callback exploded/,
+        'fatal callback error preserves the original exception';
+}
+
 done_testing;
