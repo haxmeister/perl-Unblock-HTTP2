@@ -347,7 +347,7 @@ sub _send_informational_stream {
         if $response->has_buffered_body;
 
     my $trailers = Unblock::HTTP2::_Headers->trailer_fields(
-        'inform()', $response,
+        'send_informational()', $response,
     );
     croak 'send_informational(): informational Response must not have trailers'
         if @$trailers;
