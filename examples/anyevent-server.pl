@@ -28,9 +28,8 @@ sub new {
         },
         on_eof => sub {
             my ($handle) = @_;
-            $handle->{http2}->input_eof if $handle->{http2}
-                && !$handle->{http2}->is_closed
-                ;
+            $handle->{http2}->input_eof
+                if $handle->{http2} && !$handle->{http2}->is_closed;
         },
         on_error => sub {
             my ($handle, $fatal, $error) = @_;
