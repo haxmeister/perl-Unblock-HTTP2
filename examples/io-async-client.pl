@@ -33,8 +33,7 @@ sub on_read {
         $self->{http}->input($bytes);
     }
 
-    if ($eof && !$self->{http}->is_closed
-) {
+    if ($eof && !$self->{http}->is_closed) {
         $self->{http}->input_eof;
     }
 
