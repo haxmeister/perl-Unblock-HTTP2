@@ -116,6 +116,13 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           UNBLOCK_HTTP2_INSTALL_ROOT="$INSTALL" perl xt/installed-nativeabi.t
 
+      - name: Smoke-test optional framework examples
+        if: runner.os == 'Linux' && matrix.perl == 'latest'
+        shell: bash
+        run: |
+          cpanm --notest IO::Async AnyEvent
+          bash .github/scripts/smoke-http2-examples.sh
+
       - name: Check POD syntax
         if: runner.os != 'Windows'
         shell: bash
