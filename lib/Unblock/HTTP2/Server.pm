@@ -9,7 +9,7 @@ use parent 'Unblock::HTTP2::_Connection';
 use Unblock::HTTP2::_Headers;
 use Unblock::HTTP2::Transaction;
 
-our $VERSION = '0.10';
+our $VERSION = '0.11';
 
 use constant {
     H2_DATA              => 0,
@@ -26,6 +26,7 @@ my $BODY_LOW_WATER  = 32_768;
 
 sub new {
     my ($class, %option) = @_;
+    my $transport = delete $option{transport};
 
     my %callbacks;
     for my $name (qw(
@@ -124,6 +125,7 @@ sub new {
         $session,
         role      => 'server',
         callbacks => \%callbacks,
+        transport => $transport,
     );
 
     my %initial_settings = (
@@ -134,6 +136,7 @@ sub new {
         %$settings,
     );
     $self->_submit_settings('new()', \%initial_settings);
+    $self->_transport_sync if $self->{transport_attached};
 
     return $self;
 }
@@ -363,6 +366,7 @@ sub _send_informational_stream {
         );
     }
 
+    $self->_transport_sync if $self->{transport_attached};
     return $transaction;
 }
 
@@ -491,6 +495,7 @@ sub _respond_stream {
         $self->{providers}{ $transaction->stream_id } = $provider;
     }
 
+    $self->_transport_sync if $self->{transport_attached};
     return $transaction;
 }
 sub _provide_body {
@@ -569,6 +574,8 @@ sub _write_stream_body {
 
     my $blocked = length($provider->{queue}) >= $BODY_HIGH_WATER;
     $provider->{blocked} = 1 if $blocked;
+    $self->_transport_sync if $self->{transport_attached};
+    return 0 if $self->{transport_blocked};
     return $blocked ? 0 : 1;
 }
 sub _cancel_stream {
