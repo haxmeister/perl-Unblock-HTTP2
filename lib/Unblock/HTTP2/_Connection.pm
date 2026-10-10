@@ -717,7 +717,15 @@ sub _invoke_control_callback {
 
     my $error = "$name callback failed";
     $error .= ": $@" if length $@;
-    $self->close($error);
+    # An application control callback exception is fatal, not an explicit
+    # graceful close. Defer teardown until libnghttp2 has returned when the
+    # callback runs from inside a native receive/send call.
+    if ($self->{in_session_call}) {
+        $self->{close_pending} = $error;
+    }
+    else {
+        $self->_finish_close($error);
+    }
     return 0;
 }
 
