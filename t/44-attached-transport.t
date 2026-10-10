@@ -127,15 +127,21 @@ is_deeply \@errors, [], 'no application errors';
     ok $host->{paused}, 'host pauses after fully accepting first buffer';
     my $first_count = $host->{calls};
 
-    $slow->request(
-        method => 'GET', target => '/',
+    my $drained = 0;
+    my $stream = $slow->request(
+        method => 'POST', target => '/',
         scheme => 'https', authority => 'example.test',
+        stream_body => 1,
+        on_drain => sub { ++$drained },
     );
+    is $stream->write('queued-body'), 0,
+        'stream write reports blocked attached host after accepting bytes';
     is $host->{calls}, $first_count,
         'blocked host receives no more buffers before resume_output';
     $slow->resume_output;
     ok $host->{calls} > $first_count,
         'resume_output flushes protocol output that was left in nghttp2';
+    ok $drained, 'producer is notified when host congestion clears';
     is scalar @{ $host->{aborted} }, 0, 'host was not aborted by congestion';
     $slow->close;
     is $host->{finish}, 1, 'graceful close finishes host after queued output';
