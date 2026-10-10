@@ -329,7 +329,8 @@ For a streaming local body:
     $transaction->end($last_chunk);
 
 C<write()> always accepts the bytes. A false return means the cooperative
-high-water mark was reached. Wait for C<on_drain> before producing more.
+high-water mark was reached, or an attached host has become congested.
+Wait for C<on_drain> before producing more.
 
 Incoming body bytes are consumed automatically after the body callback returns.
 
@@ -344,14 +345,17 @@ C<unconsumed_bytes()> reports body bytes still waiting for stream-level credit.
 
 A server Transaction can send an informational response with:
 
-    $transaction->send_informational($response);
+    $transaction->send_informational(status => 103);
 
 The final response uses:
 
-    $transaction->respond($response);
+    $transaction->respond(status => 200, body => "hello\n");
+
+Both calls accept a canonical Uniform::HTTP::Response object too.
 
 Pass C<stream_body =E<gt> 1> to C<respond()> to produce the response body with
-C<write()> and C<end()>.
+C<write()> and C<end()>. C<on_drain> and C<on_error> are response options,
+not HTTP fields.
 
 =head1 RESETS
 
@@ -389,7 +393,8 @@ Transaction becomes terminal.
 
 =head1 SEE ALSO
 
-L<Unblock::HTTP2>, L<Unblock::HTTP2::Client>, L<Unblock::HTTP2::Server>
+L<Unblock::HTTP2>, L<Unblock::HTTP2::Client>,
+L<Unblock::HTTP2::Server>, L<Unblock::HTTP2::Integration>
 
 =head1 LICENSE
 
