@@ -479,6 +479,7 @@ sub _update_stream_priority {
         unless $enabled == 1;
 
     $self->{session}->submit_priority_update($transaction->stream_id, $bytes);
+    $self->_transport_sync if $self->{transport_attached};
     return;
 }
 
