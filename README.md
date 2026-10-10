@@ -112,7 +112,9 @@ nghttp2 output through a native sink callback. The transport keeps ownership of
 input storage, and outbound buffers are borrowed only for the duration of the
 sink callback. Client and Server use the same ABI.
 
-The normal `input()` and `output()` methods remain the portable path.
+The portable `input()` method is available in both modes. With an
+attached host, output delivery is automatic. Without one, `output()`
+remains the low-level portable output path.
 Native integrations can discover the installed ABI with `definition()`,
 `native_include_dir()`, `header_path()`, and `c_header()`.
 
@@ -196,7 +198,8 @@ $transaction->end($last_chunk);
 The same `write()` and `end()` API is used for a streaming server response.
 
 `write()` always accepts the bytes. A false return means the transaction reached
-its cooperative high-water mark. Pause production until `on_drain` runs.
+its cooperative high-water mark or the attached framework host is congested.
+Pause production until `on_drain` runs.
 
 Incoming body bytes are automatically credited back to the peer after the body
 callback returns. A slow consumer can take manual flow-control ownership with:
@@ -214,13 +217,8 @@ Unblock sends them as HTTP/2 trailing HEADERS.
 A server can send an informational response before the final response:
 
 ```perl
-$transaction->send_informational(
-    Uniform::HTTP::Response->new(
-        status => 103,
-    ),
-);
-
-$transaction->respond($final_response);
+$transaction->send_informational(status => 103);
+$transaction->respond(status => 200, body => "ready\n");
 ```
 
 ## CONNECT
@@ -331,6 +329,7 @@ CI covers:
 - current Perl on macOS
 - Strawberry Perl on Windows
 - `distcheck` and `disttest` against the generated distribution
+- optional IO::Async and AnyEvent example client/server smoke tests on Linux
 - a staged-install NativeABI smoke test that compiles an external C consumer
   against the installed public header
 

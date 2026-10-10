@@ -10,6 +10,9 @@ That does not mean every historical or optional HTTP/2 extension is included.
 The 0.11 core includes:
 
 - client and server HTTP/2 sessions
+- optional attached-transport API with automatic output and explicit
+  framework byte ownership, EOF, and error handling
+- named-field request and response construction alongside Uniform objects
 - connection preface handling
 - HEADERS, CONTINUATION, DATA, and HPACK through libnghttp2
 - Transaction objects carried by multiplexed HTTP/2 streams, including half-close state
