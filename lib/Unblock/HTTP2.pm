@@ -58,15 +58,48 @@ Unblock::HTTP2 - non-blocking HTTP/2 protocol engine for Perl
 
     use Unblock::HTTP2::Server;
 
+    # $stream is an accepted connection owned by your event framework.
     my $server = Unblock::HTTP2::Server->new(
-        transport => $framework_stream,
+        transport  => $stream,
         on_request => sub {
             my ($tx, $request) = @_;
             $tx->respond(status => 200, body => "Hello World!\n");
         },
     );
 
-    $server->input($decrypted_http2_bytes);
+    # In the framework's read callback:
+    $server->input($received_http2_bytes);
+
+    use Unblock::HTTP2::Client;
+
+    # $client_stream is a separate connected framework stream.
+    my $client = Unblock::HTTP2::Client->new(
+        transport => $client_stream,
+    );
+
+    $client->request(
+        method    => 'GET',
+        target    => '/',
+        scheme    => 'https',
+        authority => 'example.test',
+        on_response => sub {
+            my ($tx, $response) = @_;
+            print $response->status, "\n";
+        },
+        on_body => sub {
+            my ($tx, $response, $bytes) = @_;
+            print $bytes;
+        },
+    );
+
+Both C<$stream> and C<$client_stream> are framework-owned transport objects.
+Each implements C<unblock_send($bytes)>, C<unblock_finish()>, and
+C<unblock_abort($reason)>. They feed received bytes with C<input()>.
+Outgoing HTTP/2 bytes are sent automatically through C<unblock_send()>.
+No C<output()> polling loop is needed in this mode.
+
+For complete, runnable integration examples, see
+L<Unblock::HTTP2::Integration> and the F<examples/> directory.
 
 =head1 DESCRIPTION
 

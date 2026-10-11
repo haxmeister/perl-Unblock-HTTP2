@@ -617,7 +617,10 @@ Unblock::HTTP2::Client - one HTTP/2 client connection
 
     use Unblock::HTTP2::Client;
 
-    my $client = Unblock::HTTP2::Client->new;
+    # $stream is a connected socket or TLS stream owned by your framework.
+    my $client = Unblock::HTTP2::Client->new(
+        transport => $stream,
+    );
 
     my $transaction = $client->request(
         method    => 'GET',
@@ -626,17 +629,29 @@ Unblock::HTTP2::Client - one HTTP/2 client connection
         authority => 'example.com',
 
         on_response => sub {
-            my ($transaction, $response) = @_;
+            my ($tx, $response) = @_;
+            print "Status: ", $response->status, "\n";
         },
-
         on_body => sub {
-            my ($transaction, $response, $bytes) = @_;
+            my ($tx, $response, $bytes) = @_;
+            print $bytes;
         },
-
         on_complete => sub {
-            my ($transaction) = @_;
+            my ($tx) = @_;
+            print "Response complete\n";
         },
     );
+
+    # In the framework's read callback:
+    $client->input($received_http2_bytes);
+
+The framework stream implements C<unblock_send()>, C<unblock_finish()>,
+and C<unblock_abort()>. The Client automatically sends its connection
+preface, SETTINGS, requests, and other outgoing frames through the host.
+The framework retains ownership of sockets, TLS, and its write queue.
+
+See L<Unblock::HTTP2::Integration> and F<examples/io-async-client.pl>
+for a complete connection example.
 
 =head1 DESCRIPTION
 

@@ -313,6 +313,23 @@ __END__
 
 Unblock::HTTP2::Transaction - one HTTP/2 request/response transaction
 
+=head1 SYNOPSIS
+
+    # Inside a Server on_request callback:
+    my ($tx, $request) = @_;
+    $tx->send_informational(status => 103);
+    $tx->respond(status => 200, body => "hello\n");
+
+    # Alternatively, to stream a different response:
+    $tx->respond(status => 200, stream_body => 1);
+    $tx->write($chunk);
+    $tx->end($final_chunk);
+
+The second example is an alternative to the first, not a second response
+on the same Transaction. C<respond()>, C<send_informational()>, and
+Client C<request()> accept named HTTP fields directly; creating a Uniform
+message by hand is optional.
+
 =head1 DESCRIPTION
 
 A Transaction represents one HTTP request/response exchange carried by one

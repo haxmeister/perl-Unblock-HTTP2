@@ -666,13 +666,28 @@ Unblock::HTTP2::Server - one HTTP/2 server connection
 
     use Unblock::HTTP2::Server;
 
+    # $stream is an accepted connection owned by your event framework.
     my $server = Unblock::HTTP2::Server->new(
+        transport  => $stream,
         on_request => sub {
-            my ($transaction, $request) = @_;
-
-            $transaction->respond(status => 200, body => "hello\n");
+            my ($tx, $request) = @_;
+            $tx->respond(
+                status => 200,
+                body   => "Hello World!\n",
+            );
         },
     );
+
+    # In the framework's read callback:
+    $server->input($received_http2_bytes);
+
+The framework stream implements C<unblock_send()>, C<unblock_finish()>,
+and C<unblock_abort()>. The Server automatically hands outgoing frames to
+the framework. A separate Server is created for each accepted connection,
+and each Server may handle many concurrent Transactions.
+
+See L<Unblock::HTTP2::Integration> and F<examples/linux-event-server.pl>
+for complete adapter examples.
 
 =head1 DESCRIPTION
 
