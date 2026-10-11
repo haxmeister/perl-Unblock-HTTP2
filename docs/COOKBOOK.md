@@ -20,9 +20,13 @@ The Linux::Event server is at:
 
     examples/linux-event-server.pl
 
-On Linux with Linux::Event installed:
+On Linux with Linux::Event installed and Perl 5.36 or newer:
 
     perl examples/linux-event-server.pl 8080
+
+The Linux::Event example uses Perl signatures. The Unblock::HTTP2
+distribution itself supports Perl 5.16 and newer. The IO::Async and
+AnyEvent examples do not require signature syntax.
 
 In another terminal, use curl built with HTTP/2 support:
 

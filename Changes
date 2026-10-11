@@ -1,6 +1,6 @@
 Revision history for Unblock-HTTP2
 
-0.11  Not yet released
+0.11  2026-10-10
     - Add optional attached-transport integration for Client and Server.
       Frameworks provide unblock_send(), unblock_finish(), unblock_abort().
       Output is delivered automatically without manual output pumping.
@@ -14,6 +14,8 @@ Revision history for Unblock-HTTP2
     - Treat fatal application control callback errors as transport aborts,
       distinct from explicit graceful close().
     - Exercise the IO::Async and AnyEvent client/server examples in Linux CI.
+    - Update the public module SYNOPSIS sections to lead with the new
+      attached transport and named-field API.
     - Preserve NativeABI version 1 without changing the public C header.
 
 0.10  2026-10-04
