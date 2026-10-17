@@ -55,3 +55,4 @@ t/43-native-transport-abi.t
 t/44-attached-transport.t
 t/45-attached-host-errors.t
 t/lib/Test/UnblockHTTP2.pm
+t/46-receive-lifecycle.t
