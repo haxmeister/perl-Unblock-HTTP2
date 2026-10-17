@@ -59,5 +59,6 @@ Additional interoperability CI: https://github.com/haxmeister/perl-Unblock-HTTP2
 PASS. Upper CI pins the tested source commit; subsequent handoff-only updates
 do not require changing that pin. Main remains unchanged.
 
-The coordinated milestone still awaits the corrected H3 full suite and updated
-upper live QUIC test. Consult perl-Unblock-HTTP/Handoff.md for current status.
+The coordinated ordinary Server milestone is verified. H3 full suite
+39059118633 and upper live integration 39059172525 passed. Consult
+perl-Unblock-HTTP/Handoff.md for the next design milestone.
