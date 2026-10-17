@@ -3,7 +3,7 @@
 Updated: 2026-10-17
 Repository: haxmeister/perl-Unblock-HTTP2
 Branch: feature/unified-receive-lifecycle
-Status: implementation checkpoint, not release ready.
+Status: receive/lifecycle implementation passes full CI; not a release candidate.
 
 The maintainer explicitly authorized changes to HTTP1, HTTP2, HTTP3 and
 perl-Unblock-HTTP. Do not modify main, merge, or release. The user confirmed publication of these
@@ -40,11 +40,24 @@ unchanged; this is a coordinated development branch, not a CPAN release.
 1. Check git status/branch and inspect the diff; main must remain unchanged.
 2. Local source/POD review and focused tests are complete; inspect the recorded
    validation limits before continuing with CI.
-3. Publish these authorized dependency feature branches and verify remote trees.
-4. Run full GitHub CI, fix failures, and record exact commit/run IDs here.
+3. Feature branch is published, tree verified and full CI passed (see below).
+4. Coordinate remaining H3/unified verification using the upper handoff.
 5. Update upper-layer CI pins to the published engine commits and run live
    Unblock::HTTP integration. Upper Server now maps on_headers to engine
    on_request and application on_request to engine on_request_end.
 6. Preserve frequent handoff updates. WebSocket, transaction_class, pause/resume,
    and client pooling are later milestones; no changes to Net::QUIC authorized.
 
+
+## Verified feature publication
+
+Source commit: 90639bf52394098296be4115e5485606ba6d7f92
+Full CI: https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/39058704851
+PASS on Linux Perl 5.16/latest, macOS latest, Windows Strawberry 5.40.
+Distribution/POD checks passed.
+Additional interoperability CI: https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/39058704842
+PASS. Upper CI pins the tested source commit; subsequent handoff-only updates
+do not require changing that pin. Main remains unchanged.
+
+The coordinated milestone still awaits the corrected H3 full suite and updated
+upper live QUIC test. Consult perl-Unblock-HTTP/Handoff.md for current status.
