@@ -1,3 +1,14 @@
+## Unblock::HTTP2 0.12 feature-branch release candidate (2026-10-21)
+
+The maintainer approved a coordinated family release with bumped versions.
+All explicit Unblock::HTTP2 package versions are updated from 0.11
+to 0.12 on feature/unified-receive-lifecycle; NativeABI uses the
+parent's version. The changelog records the receive/lifecycle and
+streaming contract additions used by unified Unblock::HTTP.
+Fresh standalone full CI and distribution metadata/indexer checks
+must succeed before any merge, GitHub tag/release or CPAN upload.
+Main, public native ABI and external dependencies remain untouched.
+
 # Receive body and lifecycle implementation checkpoint
 
 Updated: 2026-10-17

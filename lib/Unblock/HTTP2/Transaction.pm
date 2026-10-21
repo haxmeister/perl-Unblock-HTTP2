@@ -6,7 +6,7 @@ use Carp qw(croak);
 use Scalar::Util qw(blessed weaken);
 use Uniform::HTTP::Response;
 
-our $VERSION = '0.11';
+our $VERSION = '0.12';
 
 my %TERMINAL = map { $_ => 1 } qw(complete cancelled error);
 
