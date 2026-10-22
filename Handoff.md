@@ -1,3 +1,75 @@
+# MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP2 0.12
+Updated: 2026-10-21
+Repository: https://github.com/haxmeister/perl-Unblock-HTTP2
+Current branch: main
+Integrated development branch: feature/unified-receive-lifecycle
+Fast-forward merge checkpoint: 7a8a59910c9e2d9ad1f5d73d72820ae1f856ce76
+
+## Instructions for the next HTTP2-only conversation
+
+The user authorized merging this completed feature to MAIN. The merge
+HAS occurred: current source version is already 0.12 throughout the
+explicitly indexed packages, and Changes has the pending 0.12 entry.
+Previous GitHub version was 0.11. NO 0.12 GitHub tag/release or
+PAUSE/CPAN upload has happened. Older entries below saying main cannot
+be modified or versions are unchanged are historical, superseded by
+this heading. Finish a standalone 0.12 release audit before publishing;
+seek user approval for release/tag/upload actions.
+
+## Standalone API and completed work
+
+HTTP2 remains usable independently of upper Unblock::HTTP and any
+particular event loop. Its protocol state and multiplexing continue
+to be owned by the canonical HTTP2 Connection/Transaction.
+The coordinated API changes include:
+- Bounded buffered or streamed on_data body delivery, selectable per
+  Transaction, with 64 MiB default buffered limit.
+- Exactly-once on_finish after complete/error/cancel; invalid,
+  truncated, bodyless, oversized and mixed-mode multiplexing cases.
+- Public Client/Server request and response streaming, callbacks
+  and attached-host acceptance/backpressure behavior. No extra
+  transaction or Uniform::HTTP object is materialized.
+- SETTINGS_ENABLE_CONNECT_PROTOCOL and Extended CONNECT semantics
+  needed by the unified H2 WebSocket client/server, but WebSocket
+  framing itself belongs to the optional external WebSocket library,
+  not to this low-level engine.
+- Stream-local resets, write/on_drain, flow control and ordinary HTTP
+  stream isolation must keep working concurrently.
+- NativeABI public header/install/discovery preserved without an
+  incompatible native ABI layout change.
+
+## Verified CI and critical packaging correction
+
+This main source includes an important release CI correction:
+the .github/workflows/test.yml installed-NativeABI smoke test
+formerly hard-coded Unblock-HTTP2-0.11.tar.gz and 0.11 extraction
+path, so its Linux packaging check failed after the version bump.
+Commit 7a8a5991 replaced those with a source-derived distribution
+version; it is NOT a protocol runtime regression.
+
+The exact version-bumped, corrected source 7a8a59910c9e2d9ad1f856ce76
+passed both FULL standalone workflows:
+- Full test/installed NativeABI/distribution matrix:
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/39699576879
+- Independent HTTP/2 interop workflow:
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/39699576871
+Both PASS. Handoff-only update does not change code.
+
+## Next actions in the HTTP2-specific chat
+
+Read MAIN, Changes, Makefile.PL, MANIFEST, docs/INTEGRATION.md and
+docs/COOKBOOK.md, current public headers, and the installed-NativeABI
+test workflow. Verify full 0.12 distribution tarball disttest,
+installed header, package VERSION indexing (including any dynamic
+NativeABI version), prereq metadata and POD/synopsis. Confirm both
+native nghttp2 and portable paths with the intended dependency
+versions. Do not restart the broad architecture/performance discussion.
+After a clean release audit, request approval for GitHub release/tag
+and CPAN upload, then verify PAUSE indexing. This engine must be
+published before upper Unblock::HTTP 0.02, which requires >=0.12.
+
+## Historical engineering notes (older restrictions now superseded)
+
 ## Unblock::HTTP2 0.12 feature-branch release candidate (2026-10-21)
 
 The maintainer approved a coordinated family release with bumped versions.
