@@ -1,9 +1,5 @@
 # Unblock::HTTP2
 
-Development branch: `feature/unified-receive-lifecycle` adds bounded receive
-buffers and transaction `on_data` / `on_finish` callbacks. These changes are
-not released. See `Handoff.md` for validation and continuation instructions.
-
 [![CPAN version](https://badge.fury.io/pl/Unblock-HTTP2.svg)](https://metacpan.org/dist/Unblock-HTTP2)
 [![CPANTS Kwalitee](https://cpants.cpanauthors.org/dist/Unblock-HTTP2.svg)](https://cpants.cpanauthors.org/dist/Unblock-HTTP2)
 [![CI](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/haxmeister/perl-Unblock-HTTP2/actions/workflows/test.yml)
@@ -40,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP2
 ```
 
-Unblock::HTTP2 0.11 requires Perl 5.16 or newer.
+Unblock::HTTP2 0.12 requires Perl 5.16 or newer.
 
 Version 0.10 intentionally broke the earlier 0.04 API:
 `Transaction->inform()` was replaced by `Transaction->send_informational()`.
@@ -177,6 +173,50 @@ my $server = Unblock::HTTP2::Server->new(
 Request body chunks arrive through `on_body`.
 `on_request_end` runs when the complete request, including trailers, has
 arrived.
+
+## Receiving request and response bodies
+
+Incoming bodies stream by default. To accumulate a complete body on the
+canonical Uniform message, choose buffered reception for a connection:
+
+```perl
+my $client = Unblock::HTTP2::Client->new(
+    receive_body => 'buffered',
+    max_buffered_body_bytes => 64 * 1024 * 1024,
+);
+```
+
+The default buffered limit is 64 MiB. An oversized body fails only the
+affected HTTP/2 stream, not other multiplexed transactions. A complete
+buffered body is available from the message before its completion callback.
+
+For a particular request, `on_data` selects streamed incoming-body delivery,
+even on a connection configured for buffering:
+
+```perl
+$client->request(
+    method    => 'GET',
+    target    => '/',
+    scheme    => 'https',
+    authority => 'example.com',
+    on_data => sub {
+        my ($transaction, $bytes) = @_;
+        process_bytes($bytes);
+    },
+    on_finish => sub {
+        my ($transaction) = @_;
+        log_result($transaction->state, $transaction->error);
+    },
+);
+```
+
+The server can also register `$transaction->on_data(sub { ... })` from
+`on_request`, or use `on_request_end` for a completed buffered request.
+Do not combine `on_data` with the older `on_body` callback.
+
+`on_finish` runs exactly once after completion, error, or cancellation,
+with the transaction's final state available. See
+`perldoc Unblock::HTTP2::Transaction` for registration and callback order.
 
 ## Streaming bodies
 
@@ -360,7 +400,7 @@ included in the CPAN distribution.
 
 ## Status
 
-Unblock::HTTP2 0.11 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.12 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 engine.
 
 Future work can focus on bug fixes, interoperability, performance, or optional

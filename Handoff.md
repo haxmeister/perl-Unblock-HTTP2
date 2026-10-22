@@ -5,6 +5,25 @@ Current branch: main
 Integrated development branch: feature/unified-receive-lifecycle
 Fast-forward merge checkpoint: 7a8a59910c9e2d9ad1f5d73d72820ae1f856ce76
 
+## Standalone release-audit checkpoint (2026-10-21)
+
+- Reviewed `Changes`, `Makefile.PL`, `MANIFEST`, `MANIFEST.SKIP`,
+  public POD, integration/cookbook documentation, feature scope,
+  version test, public NativeABI header, and distribution workflow.
+- Reconciled stale 0.11/feature-branch wording in README and
+  docs/FEATURE-COMPLETENESS.md with the pending 0.12 release.
+- Public package versions are 0.12; NativeABI inherits the parent version
+  and is explicitly indexed as 0.12 via Makefile.PL provides.
+- The 0.12 source at 7a8a5991 passed full cross-platform CI, distribution
+  distcheck/disttest, installed NativeABI external-C compilation, optional
+  framework smoke tests, POD checks, and independent nghttp2 interop.
+- This checkpoint changes documentation and handoff only, not protocol
+  code, Makefile.PL, public native ABI, or test implementation.
+- The preceding GitHub release remains v0.11. Do not tag or publish
+  v0.12 or upload to CPAN until the maintainer explicitly approves.
+- Run/inspect final CI for this documentation commit and confirm the
+  release artifact/PAUSE index after the maintainer publishes it.
+
 ## Instructions for the next HTTP2-only conversation
 
 The user authorized merging this completed feature to MAIN. The merge
