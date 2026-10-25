@@ -80,6 +80,23 @@ independent of Linux::Event and the upper Unblock::HTTP library.
   Fixed the certificate step to use /usr/bin/openssl and /etc/ssl/openssl.cnf.
   No protocol tests were waived. New h2spec run required.
 
+## Additional CI findings and fixes
+
+- Full cross-platform test run 40168862386 PASS, including Windows. Interop
+  also PASS. The allocator fix is verified.
+- First live h2spec matrix (40168989126) found TCP-reset shutdown races in
+  the TLS fixture, and an nghttp2 1.70.0 difference: stream WINDOW_UPDATE
+  overflow sends GOAWAY instead of the stream-local FLOW_CONTROL_ERROR reset.
+- Fixture now sends TLS/write shutdown and drains in-flight bytes for at most
+  one second before socket close, so unread data cannot discard final GOAWAY.
+- Guard now reads the four-byte stream WINDOW_UPDATE increment and queries
+  nghttp2's actual stream send window. Overflow queues RST_STREAM and consumes
+  only that invalid frame; no duplicate flow-control state is maintained.
+- Added exact RST_STREAM/FLOW_CONTROL_ERROR and independent-stream survival
+  assertions for every input/fragment mode. Added 1600 out-of-order completions
+  and valid older-stream trailers around a skipped ID. Local regressions pass.
+- These are additional fixes, not accepted failures or h2spec exclusions.
+
 ## Remaining work (continue autonomously)
 
 1. Complete edge-case review: peer reset after a local reset, HPACK state across

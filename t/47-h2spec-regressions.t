@@ -122,6 +122,20 @@ for my $native (0, 1) {
                 is goaway_code($ctx), 1, "legacy invalid PRIORITY id=$id sends PROTOCOL_ERROR";
             }
             {
+                my $ctx = context($native, $chunk);
+                feed($ctx, request(1, 0)
+                    . frame(8, 0, 1, pack('N', 0x7fffffff))
+                    . frame(8, 0, 1, pack('N', 0x7fffffff)));
+                my @out = drain($ctx);
+                my @rst = grep { $_->{type} == 3 && $_->{id} == 1 } @out;
+                ok @rst, 'stream window overflow sends RST_STREAM';
+                is @rst ? unpack('N', $rst[0]{payload}) : undef, 3, 'reset carries FLOW_CONTROL_ERROR';
+                ok !grep($_->{type} == 7, @out), 'stream window overflow does not kill connection';
+                feed($ctx, request(3, 1));
+                is_deeply $ctx->{requests}, [1, 3], 'unrelated request still succeeds after overflow';
+                ok !defined goaway_code($ctx), 'connection remains usable';
+            }
+            {
                 my $ctx = context($native, $chunk, modern => 1);
                 feed($ctx, frame(2, 0, 1, pack('NC', 1, 15)) . frame(6, 0, 0, '12345678'));
                 my @out = drain($ctx);
@@ -155,6 +169,16 @@ for my $native (0, 1) {
                 feed($ctx, request(1, 1) . request(3, 1));
                 is_deeply $ctx->{requests}, [1, 3], 'concurrent streams remain independent';
                 ok !defined goaway_code($ctx), 'active lower stream is not classified as skipped';
+            }
+            {
+                my $ctx = context($native, $chunk);
+                feed($ctx, request(1, 0) . request(5, 0)
+                    . frame(1, 5, 1, "\x00\x05x-end\x03yes"));
+                ok !defined goaway_code($ctx), 'valid trailers on older active stream survive a skipped ID';
+                feed($ctx, frame(0, 1, 5, 'body'));
+                ok !defined goaway_code($ctx), 'newer concurrent stream completes normally';
+                feed($ctx, request(3, 1));
+                is goaway_code($ctx), 1, 'the skipped gap remains invalid after neighbors complete';
             }
             {
                 my $ctx = context($native, $chunk);
@@ -212,6 +236,24 @@ subtest 'pathological stream history is bounded' => sub {
         last if defined $code;
     }
     is $code, 11, 'fragmented history ends with ENHANCE_YOUR_CALM';
+};
+
+subtest 'out-of-order completion coalesces history' => sub {
+    my %tx;
+    my $ctx = context(1, 7, defer => 1, headers => sub { $tx{$_[0]->stream_id} = $_[0] });
+    for my $batch (0 .. 19) {
+        my $first = $batch * 160 + 1;
+        feed($ctx, join '', map { request($first + $_ * 2, 1) } 0 .. 79);
+        # This permutation repeatedly closes interior streams before neighbors.
+        for my $n (0 .. 79) {
+            my $id = $first + (($n * 37) % 80) * 2;
+            delete($tx{$id})->respond(Uniform::HTTP::Response->new(status => 200, body => 'ok'));
+            die 'out-of-order history did not coalesce' if defined goaway_code($ctx);
+        }
+    }
+    is scalar(@{ $ctx->{requests} }), 1600, '1600 out-of-order exchanges stay within the history bound';
+    feed($ctx, frame(0, 1, 1, 'late'));
+    is goaway_code($ctx), 5, 'oldest completed stream remains protected';
 };
 
 done_testing;

@@ -394,6 +394,7 @@ included in the CPAN distribution.
 - `Unblock::HTTP2::Transaction` - per-transaction API
 - `Unblock::HTTP2::NativeABI` - optional native transport ABI
 - `docs/ARCHITECTURE.md` - ownership and data flow
+- `docs/H2SPEC.md` - strict conformance checks and stream-history limits
 - `docs/FEATURE-COMPLETENESS.md` - release scope and deliberate exclusions
 - `docs/BACKEND-REQUIREMENTS.md` - private libnghttp2 binding contract
 - `docs/INTEGRATION.md` - portable and native transport integration

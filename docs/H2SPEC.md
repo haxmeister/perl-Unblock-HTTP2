@@ -48,6 +48,9 @@ connection shutdown. A manual driver must drain final protocol output and
 then close the socket when the engine no longer wants input or output. The
 new fixture follows this contract. Keeping an idle socket open after GOAWAY
 can produce a timeout even when the engine generated the right response.
+Conversely, closing TCP with unread data can send RST and hide the final
+protocol error. The fixture half-closes its write side and briefly drains
+in-flight input, including TLS shutdown, before the final socket close.
 
 The local 1.59.0 baseline reproduced seven of the ten protocol cases; the
 other three are sensitive to response/input scheduling. The regression suite
@@ -66,7 +69,11 @@ legitimate late DATA and trailers after a local reset to nghttp2, including
 HPACK updates needed by other streams. A later peer RST_STREAM ends that
 exception. Both regular input and NativeABI use this same guard.
 
-The guard inspects frame envelopes and the five-byte legacy PRIORITY payload.
+The guard inspects frame envelopes, the five-byte legacy PRIORITY payload,
+and the four-byte stream WINDOW_UPDATE increment. nghttp2 1.70.0 escalates
+stream-window overflow to a connection error; the guard instead queues the
+required FLOW_CONTROL_ERROR stream reset using nghttp2's authoritative send
+window. Other streams continue normally.
 It does not decode HPACK or copy body payloads. Fragmented prefixes need at
 most 14 bytes. Ordinary sequential completion coalesces into one history range,
 so the history does not grow with the total number of normal requests.

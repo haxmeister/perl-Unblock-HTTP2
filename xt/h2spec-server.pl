@@ -3,6 +3,7 @@ use warnings;
 use IO::Select;
 use IO::Socket::INET;
 use POSIX qw(WNOHANG);
+use Time::HiRes qw(time);
 use Unblock::HTTP2::Server;
 use Unblock::HTTP2::_nghttp2;
 use Uniform::HTTP::Response;
@@ -106,6 +107,23 @@ while (!$stopping) {
     my $expected = $error =~ /\Apeer closed during (?:read|write)\n/
         || $error =~ /nghttp2_session_mem_recv failed \(-903\): Received bad client magic/;
     warn "HARNESS FAILURE: $error" if !$ok && !$expected;
+    if ($ok && $server && !$server->want_read) {
+        # A plain close with unread kernel data can send TCP RST and erase the
+        # peer's view of the GOAWAY just written, especially with TLS records.
+        # Finish the write side, then drain in-flight input without parsing it.
+        $socket->blocking(0);
+        $socket->stop_SSL(SSL_fast_shutdown => 1) if $tls;
+        shutdown($socket, 1);
+        my $select = IO::Select->new($socket);
+        my $deadline = time() + 1;
+        while (time() < $deadline) {
+            my $pending = $socket->can('pending') && $socket->pending;
+            last unless $pending || $select->can_read($deadline - time());
+            my $n = sysread($socket, my $ignored, 65_536);
+            next if !defined($n) && ($!{EINTR} || $!{EAGAIN} || $!{EWOULDBLOCK});
+            last unless $n;
+        }
+    }
     $server->close if $server && !$server->is_closed;
     close $socket;
     exit($ok || $expected ? 0 : 1);

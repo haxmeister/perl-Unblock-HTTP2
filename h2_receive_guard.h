@@ -1,6 +1,6 @@
 /* Private receive checks for facts libnghttp2 discards in RFC 9218 mode.
  * libnghttp2 still owns frame decoding, HPACK, flow control and active streams.
- * Only frame envelopes and legacy PRIORITY's five bytes are inspected here.
+ * Only frame envelopes and small PRIORITY/WINDOW_UPDATE fields are inspected.
  */
 #define UB_H2_HISTORY_LIMIT 1024
 #define UB_H2_CLOSED 1
@@ -167,7 +167,7 @@ ub_h2_receive(ub_h2_guard *g, nghttp2_session *session,
         uint8_t type, flags;
         int32_t id;
         unsigned char kind;
-        int inspect_priority;
+        int inspect_priority, inspect_window;
 
         if (g->failed || !nghttp2_session_want_read(session))
             return (ssize_t)length;
@@ -207,7 +207,9 @@ ub_h2_receive(ub_h2_guard *g, nghttp2_session *session,
             && type == NGHTTP2_PRIORITY && frame_length == 5
             && nghttp2_session_get_remote_settings(
                 session, NGHTTP2_SETTINGS_NO_RFC7540_PRIORITIES) != 1;
-        need = inspect_priority ? 14 : 9;
+        inspect_window = g->ready && !g->continuation
+            && type == NGHTTP2_WINDOW_UPDATE && frame_length == 4 && id > 0;
+        need = inspect_priority ? 14 : inspect_window ? 13 : 9;
         if (buffered || length - offset < need) {
             if (!buffered) {
                 memcpy(g->prefix, p, 9);
@@ -227,6 +229,21 @@ ub_h2_receive(ub_h2_guard *g, nghttp2_session *session,
         if (g->ready && !g->continuation
             && frame_length <= nghttp2_session_get_local_settings(
                 session, NGHTTP2_SETTINGS_MAX_FRAME_SIZE)) {
+            /* Recent nghttp2 versions escalate stream-window overflow to a
+             * connection error. Preserve the required stream-local reset,
+             * using nghttp2's authoritative send window, without updating it.
+             * The parser is at a frame boundary: consume just this frame.
+             */
+            if (inspect_window
+                && (int64_t)nghttp2_session_get_stream_remote_window_size(session, id)
+                    + ub_h2_u31(p + 9) > INT32_MAX) {
+                rv = nghttp2_submit_rst_stream(session, NGHTTP2_FLAG_NONE, id,
+                                               NGHTTP2_FLOW_CONTROL_ERROR);
+                if (rv != 0) return rv;
+                if (!buffered) offset += 13;
+                g->prefix_used = 0;
+                continue;
+            }
             if (inspect_priority && (!id || ub_h2_u31(p + 9) == (uint32_t)id)) {
                 rv = ub_h2_reject(g, session, NGHTTP2_PROTOCOL_ERROR,
                                   "invalid legacy PRIORITY stream dependency");
