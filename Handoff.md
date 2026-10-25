@@ -1,116 +1,143 @@
-# ACTIVE H2SPEC CONFORMANCE HANDOFF
+# H2SPEC REPAIR COMPLETE: Unblock::HTTP2
 Updated: 2026-10-25
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP2
 Branch: feature/h2spec-conformance
-Baseline: 7bc0b6ccd653a74ad1e7399d27aa9d94c941b513 (main, version 0.12)
+Tested implementation: aca84baf6f55fad7d6f5aaaaa6f0505b2ff3d165
+Main/release baseline: 7bc0b6ccd653a74ad1e7399d27aa9d94c941b513 (0.12)
+Status: implementation and verification complete; ready for maintainer review.
 
-## Scope and authorization
+## Start here in the morning
 
-The user reports 13 h2spec failures and requests autonomous diagnosis and fixes
-on a feature branch, with frequent handoff updates. Continue until fixed.
-Do not modify main, merge, tag, release, or bump versions. Keep this engine
-independent of Linux::Event and the upper Unblock::HTTP library.
+The reported h2spec failures are fixed on the published feature branch. All
+147 strict cases pass in all 16 configurations, with no skips or exceptions.
+No merge, version bump, tag or release has occurred. Main remains unchanged.
+This handoff-only commit follows the tested implementation named above.
 
-## Repair checkpoint (local tests pass; CI next)
+Read this section and docs/H2SPEC.md before continuing. Do not restart the
+architecture work or repeat the diagnosis. Check remote refs and working tree
+before editing. The next step is maintainer review and, only when explicitly
+authorized, merge/release preparation. There are no outstanding repair tasks.
 
-- Initial published checkpoint: 3bc33ade88ddb7596aad05e56c5e08f17dbf0637.
-- Baseline full suite: PASS, 30 files / 525 tests. Perl 5.38.2, nghttp2 1.59.0,
-  Uniform::HTTP 0.06. h2spec 2.6.0 source 70ac2294010887f48b18e2d64f5cccd48421fad1.
-- Baseline strict h2spec: 147 / 140 pass / 0 skip / 7 fail, with both request-end
-  and early-header responses in this local environment. Earlier CI observed
-  ten shared failures and three additional manual-driver shutdown failures.
-- Exact local failures: http2/5.1/{8,9,11,12}, http2/5.1.1/2,
-  http2/5.3.1/2, http2/6.3/1. Earlier CI adds http2/5.1/{5,6}, http2/6.1/2;
-  standalone closure cases are generic/3.8, http2/5.4.1/1, http2/7/1.
-- Root cause: nghttp2 discards retired stream state with modern priorities,
-  conservatively ignores invalid late frames, and ignores legacy PRIORITY
-  validation. Lower stream IDs cannot simply be rejected: local reset races
-  are valid and must remain accepted.
-- Implemented private h2_receive_guard.h shared by Perl and NativeABI input.
-  It retains coalesced ranges for peer-closed, locally reset and skipped IDs.
-  Ordinary sequential requests use one range. Fragmented histories are capped
-  at 1024 ranges, then fail with ENHANCE_YOUR_CALM rather than forgetting facts.
-  Only envelopes and five legacy PRIORITY bytes are inspected; nghttp2 retains
-  framing, HPACK, active stream validation and flow-control ownership.
-- Payload bytes remain borrowed; at most 14 bytes buffered for split envelopes.
-  No public API/version/ABI changes. Modern negotiated priorities preserved.
-- Fixed standalone harness drains GOAWAY before honoring want_read == false.
-- Current local h2spec --strict: 147 / 147 PASS / 0 skip / 0 fail.
-- Existing full suite still PASS. New t/47 regressions PASS for both input APIs,
-  byte-at-a-time and other fragmentation, coalesced frames, exact wire error
-  codes, valid local reset races, 5000 requests and history-resource bounds.
-- A transient workspace outage recovered without source loss. One trial had
-  an undefined private nghttp2 symbol; it was replaced with the public API.
-  Only results with PERL_DL_NONLAZY=1 and exact GOAWAY assertions are trusted.
-- Local build uses scratch Makefile.local.PL with system libnghttp2 and matching
-  upstream headers (Alien absent). Tracked Makefile.PL is unchanged.
+Other repositories were not modified. Linux::Event::HTTP still needs to select
+this feature revision for integration validation, or consume a future release;
+installing the existing CPAN Unblock::HTTP2 0.12 will not pick up this repair.
+Keep engine behavior framework-neutral. The user authorized the feature branch
+and autonomous fixes, not modifications to main or a release.
 
-## Follow-up checkpoint
+## Verified results for aca84baf
 
-- Four local TCP configurations (headers/request x Perl/native) all pass
-  147 strict h2spec cases with zero failures, skips or errors.
-- Expanded regressions cover valid ignored-trailer HPACK dynamic-table reuse,
-  peer RST after local reset, adjacent reset-range splitting, client retirement,
-  frame-size and interleaved-header-block error precedence.
-- Full local suite now passes 31 files / 535 top-level tests/subtests.
-- First CI checkpoint 1f459dd passed Linux 5.16/latest, macOS latest and interop.
-  Windows compilation found realloc's interpreter-context requirement. Fixed
-  by acquiring dTHX only inside the history allocation path; rerun required.
-- Added permanent strict h2spec CI: system nghttp2 plus pinned 1.70.0, with
-  TCP/TLS and both input/response modes. All 147 cases required, no skips.
-- Harness rejects unexpected child failures. Three-byte fixture response was
-  replaced by an 18-byte body to avoid skipping the negative-window test.
-- Same-host five alternating 20,000-request benchmark runs per mode:
-  median portable baseline 16156.888/s -> repair 16130.722/s (-0.16%);
-  native baseline 15800.409/s -> repair 15438.580/s (-2.29%). This is a
-  small in-memory diagnostic, not a general network throughput claim.
-- docs/H2SPEC.md records the exact reported cases, test procedure and bounded
-  history policy. Manual/native transport shutdown contract is clarified.
+- Strict h2spec matrix: PASS
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40169302829
+  Two nghttp2 versions: system 1.59.0 and pinned 1.70.0.
+  For EACH version: TCP/TLS x response at headers/full request x Perl/NativeABI
+  input = 8 configurations. Every configuration: 147 passed / 0 failed /
+  0 skipped / 0 errors. Total 2352 successful case executions.
+  Complete JUnit reports and fixture logs are retained in workflow artifacts.
+- Full cross-platform test/distribution matrix: PASS
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40169302709
+  Linux Perl 5.16/latest, macOS latest, Windows Strawberry 5.40 all pass.
+  Linux packaging includes distcheck/disttest, installed NativeABI external-C
+  compilation, optional AnyEvent/IO::Async examples and POD checks.
+- Independent nghttp/nghttpd interoperability: PASS
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40169302758
+- Final local suite: PASS, 31 files / 536 top-level tests/subtests.
+- AddressSanitizer + UndefinedBehaviorSanitizer: PASS for reentrant close,
+  NativeABI and final conformance regressions, 3 files / 66 top-level tests.
+  Invalid memory/UB configured to abort; leak checking disabled for host Perl.
+- Regression assertions fail against the unmodified 0.12 baseline, including
+  missing STREAM_CLOSED/PROTOCOL_ERROR responses. They check actual wire codes,
+  rather than counting an arbitrary socket close as protocol success.
 
-## CI and sanitizer checkpoint
+## Diagnosis and completed changes
 
-- AddressSanitizer + UndefinedBehaviorSanitizer: PASS for reentrant-close,
-  NativeABI and conformance regressions (3 files, 65 top-level tests/subtests).
-  Leak checking disabled for the host Perl runtime; invalid memory/UB errors
-  were configured to abort immediately.
-- 0f1d68c adds the permanent matrix and the Windows allocator-context fix.
-  Both h2spec jobs built and passed the full unit suite, including nghttp2
-  1.70.0, but stopped before protocol testing because setup-perl's openssl
-  executable defaults to a missing config file even with OPENSSL_CONF unset.
-  Fixed the certificate step to use /usr/bin/openssl and /etc/ssl/openssl.cnf.
-  No protocol tests were waived. New h2spec run required.
+The earlier same-run diagnostic in Linux::Event::HTTP (40166951263) reported
+13 failures in its standalone TLS driver: ten shared protocol failures plus
+three driver-only connection-shutdown failures. Exact cases are documented in
+docs/H2SPEC.md. Local 1.59.0 reproduction found seven of the shared cases with
+both response timings; the other three depend on input/response scheduling.
+The entire suite, including all reported cases, now passes in every CI mode.
 
-## Additional CI findings and fixes
+nghttp2 discards closed stream state with modern priorities enabled and then
+conservatively ignores some invalid late frames. Simply rejecting all lower
+stream IDs would break valid trailers racing a locally sent RST_STREAM.
+The private h2_receive_guard.h now distinguishes peer-closed streams, local
+resets and skipped IDs. Both normal input and NativeABI use the same guard.
+Legitimate late DATA/trailers after a local reset remain accepted; HPACK state
+is preserved for other streams. A subsequent peer reset ends that exception.
 
-- Full cross-platform test run 40168862386 PASS, including Windows. Interop
-  also PASS. The allocator fix is verified.
-- First live h2spec matrix (40168989126) found TCP-reset shutdown races in
-  the TLS fixture, and an nghttp2 1.70.0 difference: stream WINDOW_UPDATE
-  overflow sends GOAWAY instead of the stream-local FLOW_CONTROL_ERROR reset.
-- Fixture now sends TLS/write shutdown and drains in-flight bytes for at most
-  one second before socket close, so unread data cannot discard final GOAWAY.
-- Guard now reads the four-byte stream WINDOW_UPDATE increment and queries
-  nghttp2's actual stream send window. Overflow queues RST_STREAM and consumes
-  only that invalid frame; no duplicate flow-control state is maintained.
-- Added exact RST_STREAM/FLOW_CONTROL_ERROR and independent-stream survival
-  assertions for every input/fragment mode. Added 1600 out-of-order completions
-  and valid older-stream trailers around a skipped ID. Local regressions pass.
-- These are additional fixes, not accepted failures or h2spec exclusions.
+The guard also validates legacy PRIORITY fields without disabling negotiated
+RFC 9218. nghttp2 1.70.0 escalates stream-window overflow to a connection error;
+the guard queries nghttp2's actual send window and instead queues the required
+FLOW_CONTROL_ERROR stream reset. Unrelated streams continue normally.
 
-## Remaining work (continue autonomously)
+Only frame envelopes and small PRIORITY/WINDOW_UPDATE fields are inspected.
+nghttp2 still owns framing, HPACK, active stream validation and flow control.
+Body windows stay borrowed, with at most 14 bytes buffered across split input.
+Retired/skipped ID ranges coalesce: ordinary sequential traffic needs one range.
+More than 1024 distinct ranges causes ENHANCE_YOUR_CALM, bounding pathological
+history fragmentation without forgetting facts needed to distinguish resets.
+This is not a request-count limit. The resource policy is documented.
 
-1. Complete edge-case review: peer reset after a local reset, HPACK state across
-   ignored trailers, client-side closed response streams, history coalescing.
-2. Run h2spec for early/full response, manual/native input, TCP/TLS. Add a strict
-   zero-failure CI gate with logs/artifacts and complete suite count checks.
-3. Run full cross-platform CI, distribution tests and nghttp interop.
-4. Document the bounded history resource policy and reproducible test commands.
-5. Publish final checkpoints and update this handoff with verified CI links.
+The standalone test fixture drains final GOAWAY/output, sends write/TLS
+shutdown and briefly drains in-flight input before socket close. This avoids
+both leaving the socket open after protocol shutdown and losing final output
+to TCP RST when unread data remains. It supports simultaneous h2spec probes.
+Unexpected child failures fail CI; PERL_DL_NONLAZY=1 prevents lazy-linker errors
+from appearing as successful expected connection closes. An 18-byte response
+ensures the negative-window case runs instead of being skipped.
 
-The older release notes below are historical. The user reports that 0.12 was
-released to GitHub and CPAN; this task is a new conformance repair.
+Public API, version 0.12, ABI layout and dependency requirements are unchanged.
+Makefile.PL only adds the private header's incremental-build dependency.
+MANIFEST includes the private header, new regressions and conformance guide.
+Changes contains an Unreleased entry. No production framework adapter added.
+
+## Important regression coverage
+
+- Both input paths, whole buffers and 1/7/13-byte fragments, coalesced frames.
+- Closed and reset stream reuse; skipped lower IDs; valid active older streams.
+- Local reset races, ignored-trailer HPACK reuse, later peer reset and adjacent
+  history ranges; client-side response retirement as well as server requests.
+- Legacy vs negotiated modern priorities; stream-window overflow isolation.
+- Frame-size and interleaved-header-block error precedence.
+- 5000 sequential requests and 1600 out-of-order completions; old retired IDs
+  still protected, plus explicit history-bound behavior for fragmented IDs.
+
+## Reproduce and inspect
+
+Normal build with the distribution prerequisites installed:
+
+    perl Makefile.PL
+    make test
+    H2SPEC_BIN=/path/to/h2spec bash .github/scripts/check-h2spec.sh
+
+The script runs all four TCP combinations. Set UNBLOCK_HTTP2_TLS_CERT and
+UNBLOCK_HTTP2_TLS_KEY to include all four TLS combinations. It requires pinned
+h2spec 2.6.0 source 70ac2294010887f48b18e2d64f5cccd48421fad1 and validates
+147 strict cases with no failures, skips or errors. See .github/workflows/h2spec.yml
+for dependency setup and pinned nghttp2 1.70.0 source.
+
+Review the implementation diff against 7bc0b6c. The branch checkpoints include
+1f459dd (initial repair), 0f1d68c (matrix, reset-history and Windows allocator
+context fix), b01fd800 (system OpenSSL certificate configuration), and aca84baf
+(final stream-window isolation and transport shutdown, all CI green).
+
+Local workspace at completion:
+/workspace/scratch/7b2883b21cb4/perl-Unblock-HTTP2
+Local build used system libnghttp2 1.59.0 plus matching upstream headers and
+Uniform::HTTP 0.06. Alien was unavailable, so a scratch-only configuration lives
+at ../build-tools/http2-local.PL; it does not change distribution prerequisites.
+Local baseline checkout is ../http2-baseline, detached at 7bc0b6c. Logs in /tmp
+are disposable; durable results are the CI artifacts and this repository.
+
+An exploratory same-host benchmark before the final WINDOW_UPDATE addition
+used five alternating 20,000-request runs per input mode. Median portable
+baseline 16156.888/s -> repair 16130.722/s (-0.16%); native 15800.409/s ->
+15438.580/s (-2.29%). This small in-memory diagnostic is not a claim about
+production network throughput or the final revision's performance.
 
 ---
+
+## Historical release handoff (superseded by the completed repair above)
 
 # MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP2 0.12
 Updated: 2026-10-21
