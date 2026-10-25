@@ -5,14 +5,14 @@ Branch: main
 Merged repair: 4e98e6c3a7821ed69bc55a66740e7d0cab5c748f
 Tested implementation: aca84baf6f55fad7d6f5aaaaa6f0505b2ff3d165
 Previous release: v0.12 / 7bc0b6ccd653a74ad1e7399d27aa9d94c941b513
-Status: release candidate 0.13 prepared; final release-version validation pending.
+Status: 0.13 release preparation complete; all validation green; ready to publish.
 
 ## Start here
 
 The user explicitly requested "push this to main and do a release prep".
 Main has been fast-forwarded to the completed h2spec repair; the feature branch
 is retained. All package versions, the version test, README and feature-scope
-documentation are being updated to 0.13. Changes has dated 0.13 release notes.
+documentation have been updated to 0.13. Changes has dated 0.13 release notes.
 Public POD documents the 1024-range resource limit. No public API, NativeABI
 version, dependency requirement or protocol implementation changed during prep.
 
@@ -20,8 +20,11 @@ Local 0.13 validation passed: 31 test files / 536 top-level tests, all six
 public POD checks, clean distcheck, and generated archive/metadata audit.
 All six indexed modules are 0.13; private/public headers and regressions are
 in the archive. The packaged Makefile.PL is the normal Alien-based original.
-Pending: publish this release-preparation commit and verify all main-branch
-CI workflows; record their exact results before declaring the candidate ready.
+Published release candidate: aa7992f173948464982728f8e68b9b3e7a681f98.
+Strict h2spec passed all 16 configurations on this exact candidate. Linux
+5.16/latest, macOS and Windows all passed. Interop passed.
+This final handoff-only checkpoint follows the tested candidate; release code
+and distribution contents are unchanged. There are no pending prep tasks.
 No v0.13 tag, GitHub release or CPAN upload has been made. Those publishing
 steps remain for the maintainer after reviewing the prepared candidate.
 
@@ -37,7 +40,34 @@ overflow resets only the affected stream. Stream-history fragmentation is
 bounded at 1024 ranges with ENHANCE_YOUR_CALM on excess. Transport integration
 documentation explains how to drain final output before closing. Strict
 h2spec passes all 147 cases in 16 configurations on the repaired implementation;
-release-version CI is pending. Public API and NativeABI version 1 are unchanged.
+the same conformance matrix also passes on 0.13. Public API and NativeABI
+version 1 are unchanged.
+
+## Release candidate verification (aa7992f)
+
+- Test/distribution matrix: https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40204641862
+  PASS: Linux 5.16/latest, macOS latest and Windows Strawberry 5.40.
+  Linux source and distribution suites each passed 31 files / 536 tests.
+  distcheck, disttest, installed NativeABI external-C compilation, framework
+  smoke tests and public POD checks passed.
+- Strict h2spec: https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40204641867
+  PASS: nghttp2 system 1.59.0 and pinned 1.70.0, eight modes per backend.
+  Each mode: 147 passed, zero failures/errors/skips (2352 case executions).
+- Interop: https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40204641879
+  PASS: client against nghttpd and server against nghttp.
+- Local 0.13 archive and META.json checked: six indexed public modules at 0.13;
+  normal dependency declarations; private guard and installed ABI header,
+  regression tests and conformance docs present; handoff/build output excluded.
+- Public native header unchanged from v0.12. NativeABI version remains 1.
+
+## Remaining release actions for the maintainer
+
+Review Changes and this handoff, build the distribution
+with normal prerequisites (`perl Makefile.PL && make disttest && make dist`),
+and publish Unblock-HTTP2-0.13.tar.gz to CPAN plus the v0.13 tag/GitHub release.
+Tag/release publication and CPAN upload have not been performed by this task.
+After publication, verify PAUSE indexing of all six public modules and update
+consumers to 0.13. No further code repair or release-preparation work is pending.
 
 ## Verified results for aca84baf
 
