@@ -1,5 +1,14 @@
 Revision history for Unblock-HTTP2
 
+Unreleased
+    - Validate retired and skipped stream IDs through a bounded native
+      receive guard shared by Perl input and NativeABI input.
+    - Preserve legitimate DATA/trailer races after local RST_STREAM,
+      including HPACK updates and independent multiplexed streams.
+    - Validate legacy PRIORITY frames without disabling RFC 9218.
+    - Add strict h2spec coverage for TCP/TLS, early/full responses and
+      both input paths, plus fragmented-input and resource-limit regressions.
+
 0.12  2026-10-21
     - Add coordinated receive-mode selection and bounded body buffering
       while preserving real HTTP/2 engine Transactions and Uniform objects.

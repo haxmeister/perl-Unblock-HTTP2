@@ -1705,6 +1705,10 @@ on_frame_recv_callback(nghttp2_session *session,
         && !(frame->hd.flags & NGHTTP2_FLAG_ACK)) {
         ps->guard.ready = 1;
     }
+    if (frame->hd.type == NGHTTP2_RST_STREAM) {
+        result = ub_h2_peer_reset(&ps->guard, session, frame->hd.stream_id);
+        if (result != 0) return result;
+    }
 
     if (frame->hd.type == NGHTTP2_HEADERS) {
         block = take_header_block(ps, frame->hd.stream_id);
@@ -1915,7 +1919,6 @@ new_session(pTHX_ HV *callbacks_hv, int server, size_t max_header_list_size)
     }
     ps->uniform_api = uniform_api;
     ps->server = server ? 1 : 0;
-    ps->guard.server = ps->server;
     ps->guard.preface_left = server ? 24 : 0;
     ps->max_header_list_size = max_header_list_size;
 

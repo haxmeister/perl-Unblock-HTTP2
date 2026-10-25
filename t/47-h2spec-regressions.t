@@ -2,8 +2,12 @@ use strict;
 use warnings;
 use Test::More;
 use Unblock::HTTP2::Server;
+use Unblock::HTTP2::Client;
 use Unblock::HTTP2::_nghttp2;
+use Uniform::HTTP::Request;
 use Uniform::HTTP::Response;
+use lib 't/lib';
+use Test::UnblockHTTP2 qw(pump_until_idle);
 
 sub frame {
     my ($type, $flags, $id, $payload) = @_;
@@ -132,15 +136,56 @@ for my $native (0, 1) {
                 # Insert x-race: yes in HPACK's dynamic table on the ignored stream.
                 my $trailer = "\x40\x06x-race\x03yes";
                 feed($ctx, frame(0, 0, 1, 'already in flight')
-                    . frame(1, 5, 1, $trailer) . request(3, 0));
+                    . frame(1, 5, 1, $trailer) . frame(1, 4, 3, $headers . "\xbe"));
                 is_deeply $ctx->{requests}, [1, 3], 'late DATA and trailers after local reset preserve connection';
                 ok !defined goaway_code($ctx), 'local reset race does not send GOAWAY';
+            }
+            {
+                my $ctx = context($native, $chunk, headers => sub { $_[0]->cancel });
+                feed($ctx, request(1, 0) . request(3, 0) . request(5, 0));
+                drain($ctx);
+                feed($ctx, frame(3, 0, 3, pack('N', 8)));
+                feed($ctx, frame(0, 0, 1, 'late') . frame(0, 0, 5, 'late'));
+                ok !defined goaway_code($ctx), 'splitting reset history preserves neighbor races';
+                feed($ctx, frame(0, 0, 3, 'after peer reset'));
+                is goaway_code($ctx), 5, 'peer reset ends the local-reset race exception';
             }
             {
                 my $ctx = context($native, $chunk, defer => 1);
                 feed($ctx, request(1, 1) . request(3, 1));
                 is_deeply $ctx->{requests}, [1, 3], 'concurrent streams remain independent';
                 ok !defined goaway_code($ctx), 'active lower stream is not classified as skipped';
+            }
+            {
+                my $ctx = context($native, $chunk);
+                feed($ctx, request(1, 1));
+                drain($ctx);
+                # Oversized DATA must preserve nghttp2's FRAME_SIZE_ERROR,
+                # rather than being replaced by our retired-stream error.
+                feed($ctx, frame(0, 0, 1, 'x' x 16385));
+                is goaway_code($ctx), 6, 'frame size validation takes precedence';
+            }
+            {
+                my $ctx = context($native, $chunk);
+                feed($ctx, request(1, 1));
+                drain($ctx);
+                feed($ctx, frame(1, 0, 3, $headers) . frame(0, 0, 1, 'late'));
+                is goaway_code($ctx), 1, 'interleaved header block keeps PROTOCOL_ERROR precedence';
+            }
+            {
+                my $client = Unblock::HTTP2::Client->new;
+                my $server = Unblock::HTTP2::Server->new(on_request_end => sub {
+                    $_[0]->respond(Uniform::HTTP::Response->new(status => 200, body => 'ok'));
+                });
+                pump_until_idle($client, $server);
+                my $tx = $client->request(Uniform::HTTP::Request->new(
+                    method => 'GET', scheme => 'http', target => '/', authority => 'example.test'));
+                pump_until_idle($client, $server);
+                ok $tx->is_complete, 'client response completed';
+                my $ctx = { server => $client, chunk => $chunk };
+                $ctx->{driver} = Unblock::HTTP2::_nghttp2::NativeDriver->new($client) if $native;
+                feed($ctx, frame(0, 1, $tx->stream_id, 'late response'));
+                is goaway_code($ctx), 5, 'client also rejects DATA on a retired response stream';
             }
         };
     }

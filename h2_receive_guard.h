@@ -26,7 +26,6 @@ typedef struct {
     unsigned char prefix[14];
     int ready;
     int failed;
-    int server;
 } ub_h2_guard;
 
 static int
@@ -75,6 +74,7 @@ ub_h2_remember(ub_h2_guard *g, nghttp2_session *session,
                                 "stream history fragmentation limit");
         }
         if (g->count == g->capacity) {
+            dTHX; /* Windows Perl can route realloc through its interpreter. */
             size_t capacity = g->capacity ? g->capacity * 2 : 8;
             h = (ub_h2_history *)realloc(g->history, capacity * sizeof(*h));
             if (!h) return NGHTTP2_ERR_NOMEM;
@@ -121,6 +121,35 @@ ub_h2_u31(const uint8_t *p)
         | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
 
+/* A peer RST_STREAM can arrive after our own reset was serialized. It ends
+ * the in-flight-frame exception even though nghttp2 has already freed the
+ * stream. Split a coalesced local-reset range without losing its neighbors.
+ */
+static int
+ub_h2_peer_reset(ub_h2_guard *g, nghttp2_session *session, int32_t id)
+{
+    size_t i;
+    int rv;
+    if (!(id & 1) || ub_h2_history_kind(g, id) != UB_H2_LOCAL_RESET) return 0;
+    for (i = 0; i < g->count; ++i) {
+        ub_h2_history old = g->history[i];
+        if (id < old.first || id > old.last) continue;
+        --g->count;
+        memmove(g->history + i, g->history + i + 1,
+                (g->count - i) * sizeof(*g->history));
+        if (id > old.first) {
+            rv = ub_h2_remember(g, session, old.first, id - 2, old.kind);
+            if (rv != 0) return rv;
+        }
+        rv = ub_h2_remember(g, session, id, id, UB_H2_CLOSED);
+        if (rv != 0) return rv;
+        if (id < old.last)
+            return ub_h2_remember(g, session, id + 2, old.last, old.kind);
+        return 0;
+    }
+    return 0;
+}
+
 /* Both public input paths call this routine. Forward borrowed payload windows
  * directly, stopping at frame boundaries so callbacks update history before
  * the next frame is checked. Buffer at most 14 bytes across fragmented reads.
@@ -149,7 +178,7 @@ ub_h2_receive(ub_h2_guard *g, nghttp2_session *session,
             if (n > *left) n = *left;
             rv = nghttp2_session_mem_recv(session, data + offset, n);
             if (rv < 0) return rv;
-            if ((size_t)rv != n) return (ssize_t)offset + rv;
+            if ((size_t)rv != n) return NGHTTP2_ERR_CALLBACK_FAILURE;
             *left -= n;
             offset += n;
             continue;
@@ -226,7 +255,7 @@ ub_h2_receive(ub_h2_guard *g, nghttp2_session *session,
         g->payload_left = frame_length - (n - 9);
         rv = nghttp2_session_mem_recv(session, p, n);
         if (rv < 0) return rv;
-        if ((size_t)rv != n) return (ssize_t)offset + rv;
+        if ((size_t)rv != n) return NGHTTP2_ERR_CALLBACK_FAILURE;
         if (!buffered) offset += n;
         g->prefix_used = 0;
     }

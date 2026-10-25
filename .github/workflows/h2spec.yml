@@ -1,0 +1,73 @@
+name: h2spec
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        nghttp2: [system, '1.70.0']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: latest
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnghttp2-dev pkg-config cmake libssl-dev
+      - name: Build pinned nghttp2 1.70.0
+        if: matrix.nghttp2 == '1.70.0'
+        shell: bash
+        run: |
+          git clone https://github.com/nghttp2/nghttp2.git "$RUNNER_TEMP/nghttp2-src"
+          git -C "$RUNNER_TEMP/nghttp2-src" checkout 85e300c79fb6dbcfa9c1013215c8710c1c2cd3d2
+          cmake -S "$RUNNER_TEMP/nghttp2-src" -B "$RUNNER_TEMP/nghttp2-build" \
+            -DENABLE_LIB_ONLY=ON -DBUILD_TESTING=OFF -DENABLE_DOC=OFF \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/nghttp2"
+          cmake --build "$RUNNER_TEMP/nghttp2-build" -j2
+          cmake --install "$RUNNER_TEMP/nghttp2-build"
+          echo "PKG_CONFIG_PATH=$RUNNER_TEMP/nghttp2/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/nghttp2/lib" >> "$GITHUB_ENV"
+      - name: Install Perl dependencies
+        run: |
+          cpanm --notest Alien::nghttp2 Uniform::HTTP@0.06 IO::Socket::SSL
+          cpanm --notest --installdeps .
+          pkg-config --modversion libnghttp2
+          perl -MAlien::nghttp2 -e 'print Alien::nghttp2->cflags, "\n", Alien::nghttp2->libs, "\n"'
+      - name: Build and run regression suite
+        run: |
+          perl Makefile.PL
+          make test
+      - name: Build pinned h2spec 2.6.0
+        run: |
+          git clone https://github.com/summerwind/h2spec.git "$RUNNER_TEMP/h2spec-src"
+          git -C "$RUNNER_TEMP/h2spec-src" checkout 70ac2294010887f48b18e2d64f5cccd48421fad1
+          cd "$RUNNER_TEMP/h2spec-src"
+          go build -o "$RUNNER_TEMP/h2spec" ./cmd/h2spec
+      - name: Run all strict cases over TCP and TLS in both input and response modes
+        shell: bash
+        run: |
+          mkdir -p .h2spec-results
+          env -u OPENSSL_CONF openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$RUNNER_TEMP/h2spec-key.pem" -out "$RUNNER_TEMP/h2spec-cert.pem" \
+            -days 1 -subj '/CN=localhost'
+          export UNBLOCK_HTTP2_TLS_KEY="$RUNNER_TEMP/h2spec-key.pem"
+          export UNBLOCK_HTTP2_TLS_CERT="$RUNNER_TEMP/h2spec-cert.pem"
+          export H2SPEC_BIN="$RUNNER_TEMP/h2spec"
+          bash .github/scripts/check-h2spec.sh
+      - name: Preserve complete conformance reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h2spec-nghttp2-${{ matrix.nghttp2 }}
+          path: .h2spec-results/
+          include-hidden-files: true

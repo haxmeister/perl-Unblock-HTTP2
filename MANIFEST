@@ -58,3 +58,4 @@ t/lib/Test/UnblockHTTP2.pm
 t/46-receive-lifecycle.t
 h2_receive_guard.h
 t/47-h2spec-regressions.t
+docs/H2SPEC.md

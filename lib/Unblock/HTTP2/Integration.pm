@@ -217,6 +217,11 @@ Without transport => $host, the original low-level API remains available:
         $framework->write($bytes);
     }
 
+After draining protocol output, if both want_read() and want_write() are
+false, flush the transport's queued bytes and close the socket. Do not leave
+it open waiting for more peer input. In particular, a final GOAWAY must be
+sent before closing. The same rule applies to native output sinks.
+
 Do not mix attached and manual output ownership. output() is an error when
 a host is attached.
 

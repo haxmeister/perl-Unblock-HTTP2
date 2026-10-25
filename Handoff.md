@@ -45,6 +45,28 @@ independent of Linux::Event and the upper Unblock::HTTP library.
 - Local build uses scratch Makefile.local.PL with system libnghttp2 and matching
   upstream headers (Alien absent). Tracked Makefile.PL is unchanged.
 
+## Follow-up checkpoint
+
+- Four local TCP configurations (headers/request x Perl/native) all pass
+  147 strict h2spec cases with zero failures, skips or errors.
+- Expanded regressions cover valid ignored-trailer HPACK dynamic-table reuse,
+  peer RST after local reset, adjacent reset-range splitting, client retirement,
+  frame-size and interleaved-header-block error precedence.
+- Full local suite now passes 31 files / 535 top-level tests/subtests.
+- First CI checkpoint 1f459dd passed Linux 5.16/latest, macOS latest and interop.
+  Windows compilation found realloc's interpreter-context requirement. Fixed
+  by acquiring dTHX only inside the history allocation path; rerun required.
+- Added permanent strict h2spec CI: system nghttp2 plus pinned 1.70.0, with
+  TCP/TLS and both input/response modes. All 147 cases required, no skips.
+- Harness rejects unexpected child failures. Three-byte fixture response was
+  replaced by an 18-byte body to avoid skipping the negative-window test.
+- Same-host five alternating 20,000-request benchmark runs per mode:
+  median portable baseline 16156.888/s -> repair 16130.722/s (-0.16%);
+  native baseline 15800.409/s -> repair 15438.580/s (-2.29%). This is a
+  small in-memory diagnostic, not a general network throughput claim.
+- docs/H2SPEC.md records the exact reported cases, test procedure and bounded
+  history policy. Manual/native transport shutdown contract is clarified.
+
 ## Remaining work (continue autonomously)
 
 1. Complete edge-case review: peer reset after a local reset, HPACK state across
