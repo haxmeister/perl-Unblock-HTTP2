@@ -1,3 +1,38 @@
+# ACTIVE H2SPEC CONFORMANCE HANDOFF
+Updated: 2026-10-25
+Repository: https://github.com/haxmeister/perl-Unblock-HTTP2
+Branch: feature/h2spec-conformance
+Baseline: 7bc0b6ccd653a74ad1e7399d27aa9d94c941b513 (main, version 0.12)
+
+## Scope and authorization
+
+The user reports 13 h2spec failures and requests autonomous diagnosis and fixes
+on a feature branch, with frequent handoff updates. Continue until fixed.
+Do not modify main, merge, tag, release, or bump versions. Keep this engine
+independent of Linux::Event and the upper Unblock::HTTP library.
+
+## Current checkpoint
+
+- Clean main checkout and remote branches inspected; created feature branch.
+- Read previous handoff and architecture/backend requirements.
+- Existing CI covers unit tests and nghttp/nghttpd interop, but not h2spec.
+- Setting up h2spec 2.6.0 and local dependencies for a standalone reproduction.
+- No protocol changes yet. The reported 13 cases have not yet been reproduced.
+
+## Next steps
+
+1. Build the released baseline and run all h2spec suites against a minimal
+   standalone IO::Socket server that drains output before closing.
+2. Record exact failures and distinguish RFC behavior from harness defects.
+3. Add focused regression tests, fix shared engine/native boundary as needed.
+4. Run full tests, native/portable paths and h2spec; add permanent CI coverage.
+5. Publish feature checkpoints and update this section with commands/results.
+
+The older release notes below are historical. The user reports that 0.12 was
+released to GitHub and CPAN; this task is a new conformance repair.
+
+---
+
 # MAIN-BRANCH RELEASE HANDOFF: Unblock::HTTP2 0.12
 Updated: 2026-10-21
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP2
