@@ -10,7 +10,7 @@ use Unblock::HTTP2::_Headers;
 use Unblock::HTTP2::Transaction;
 use Uniform::HTTP::Request;
 
-our $VERSION = '0.12';
+our $VERSION = '0.13';
 
 use constant {
     H2_DATA              => 0,

@@ -1,28 +1,43 @@
-# H2SPEC REPAIR COMPLETE: Unblock::HTTP2
+# MAIN RELEASE PREPARATION: Unblock::HTTP2 0.13
 Updated: 2026-10-25
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP2
-Branch: feature/h2spec-conformance
+Branch: main
+Merged repair: 4e98e6c3a7821ed69bc55a66740e7d0cab5c748f
 Tested implementation: aca84baf6f55fad7d6f5aaaaa6f0505b2ff3d165
-Main/release baseline: 7bc0b6ccd653a74ad1e7399d27aa9d94c941b513 (0.12)
-Status: implementation and verification complete; ready for maintainer review.
+Previous release: v0.12 / 7bc0b6ccd653a74ad1e7399d27aa9d94c941b513
+Status: release candidate 0.13 prepared; final release-version validation pending.
 
-## Start here in the morning
+## Start here
 
-The reported h2spec failures are fixed on the published feature branch. All
-147 strict cases pass in all 16 configurations, with no skips or exceptions.
-No merge, version bump, tag or release has occurred. Main remains unchanged.
-This handoff-only commit follows the tested implementation named above.
+The user explicitly requested "push this to main and do a release prep".
+Main has been fast-forwarded to the completed h2spec repair; the feature branch
+is retained. All package versions, the version test, README and feature-scope
+documentation are being updated to 0.13. Changes has dated 0.13 release notes.
+Public POD documents the 1024-range resource limit. No public API, NativeABI
+version, dependency requirement or protocol implementation changed during prep.
 
-Read this section and docs/H2SPEC.md before continuing. Do not restart the
-architecture work or repeat the diagnosis. Check remote refs and working tree
-before editing. The next step is maintainer review and, only when explicitly
-authorized, merge/release preparation. There are no outstanding repair tasks.
+Local 0.13 validation passed: 31 test files / 536 top-level tests, all six
+public POD checks, clean distcheck, and generated archive/metadata audit.
+All six indexed modules are 0.13; private/public headers and regressions are
+in the archive. The packaged Makefile.PL is the normal Alien-based original.
+Pending: publish this release-preparation commit and verify all main-branch
+CI workflows; record their exact results before declaring the candidate ready.
+No v0.13 tag, GitHub release or CPAN upload has been made. Those publishing
+steps remain for the maintainer after reviewing the prepared candidate.
 
-Other repositories were not modified. Linux::Event::HTTP still needs to select
-this feature revision for integration validation, or consume a future release;
-installing the existing CPAN Unblock::HTTP2 0.12 will not pick up this repair.
-Keep engine behavior framework-neutral. The user authorized the feature branch
-and autonomous fixes, not modifications to main or a release.
+Other repositories were not modified. Linux::Event::HTTP should consume the
+new release when available and validate its own shutdown integration. The
+existing CPAN 0.12 does not include these repairs.
+
+## Prepared release notes
+
+0.13 fixes HTTP/2 conformance for retired/skipped streams and legacy PRIORITY
+frames while retaining valid local-reset races and HPACK state. Stream window
+overflow resets only the affected stream. Stream-history fragmentation is
+bounded at 1024 ranges with ENHANCE_YOUR_CALM on excess. Transport integration
+documentation explains how to drain final output before closing. Strict
+h2spec passes all 147 cases in 16 configurations on the repaired implementation;
+release-version CI is pending. Public API and NativeABI version 1 are unchanged.
 
 ## Verified results for aca84baf
 

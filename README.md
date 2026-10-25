@@ -36,7 +36,7 @@ From CPAN:
 cpanm Unblock::HTTP2
 ```
 
-Unblock::HTTP2 0.12 requires Perl 5.16 or newer.
+Unblock::HTTP2 0.13 requires Perl 5.16 or newer.
 
 Version 0.10 intentionally broke the earlier 0.04 API:
 `Transaction->inform()` was replaced by `Transaction->send_informational()`.
@@ -401,8 +401,14 @@ included in the CPAN distribution.
 
 ## Status
 
-Unblock::HTTP2 0.12 is feature-complete for its intended role as a reusable,
+Unblock::HTTP2 0.13 is feature-complete for its intended role as a reusable,
 event-loop-neutral HTTP/2 engine.
+
+Version 0.13 repairs late-frame validation and stream-window error isolation.
+Strict h2spec coverage exercises 147 cases across both input paths, TCP/TLS,
+both response timings and two nghttp2 versions. See `docs/H2SPEC.md` for the
+1024-range stream-history resource limit and transport shutdown contract.
+The public API, NativeABI version 1 and prerequisites are unchanged.
 
 Future work can focus on bug fixes, interoperability, performance, or optional
 extensions without changing the transport boundary.
