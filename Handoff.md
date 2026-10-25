@@ -67,6 +67,19 @@ independent of Linux::Event and the upper Unblock::HTTP library.
 - docs/H2SPEC.md records the exact reported cases, test procedure and bounded
   history policy. Manual/native transport shutdown contract is clarified.
 
+## CI and sanitizer checkpoint
+
+- AddressSanitizer + UndefinedBehaviorSanitizer: PASS for reentrant-close,
+  NativeABI and conformance regressions (3 files, 65 top-level tests/subtests).
+  Leak checking disabled for the host Perl runtime; invalid memory/UB errors
+  were configured to abort immediately.
+- 0f1d68c adds the permanent matrix and the Windows allocator-context fix.
+  Both h2spec jobs built and passed the full unit suite, including nghttp2
+  1.70.0, but stopped before protocol testing because setup-perl's openssl
+  executable defaults to a missing config file even with OPENSSL_CONF unset.
+  Fixed the certificate step to use /usr/bin/openssl and /etc/ssl/openssl.cnf.
+  No protocol tests were waived. New h2spec run required.
+
 ## Remaining work (continue autonomously)
 
 1. Complete edge-case review: peer reset after a local reset, HPACK state across

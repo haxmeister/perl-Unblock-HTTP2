@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p .h2spec-results
-          env -u OPENSSL_CONF openssl req -x509 -newkey rsa:2048 -nodes \
+          /usr/bin/openssl req -config /etc/ssl/openssl.cnf -x509 -newkey rsa:2048 -nodes \
             -keyout "$RUNNER_TEMP/h2spec-key.pem" -out "$RUNNER_TEMP/h2spec-cert.pem" \
             -days 1 -subj '/CN=localhost'
           export UNBLOCK_HTTP2_TLS_KEY="$RUNNER_TEMP/h2spec-key.pem"
