@@ -56,3 +56,5 @@ t/44-attached-transport.t
 t/45-attached-host-errors.t
 t/lib/Test/UnblockHTTP2.pm
 t/46-receive-lifecycle.t
+h2_receive_guard.h
+t/47-h2spec-regressions.t

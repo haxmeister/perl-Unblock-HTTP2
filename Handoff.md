@@ -11,22 +11,49 @@ on a feature branch, with frequent handoff updates. Continue until fixed.
 Do not modify main, merge, tag, release, or bump versions. Keep this engine
 independent of Linux::Event and the upper Unblock::HTTP library.
 
-## Current checkpoint
+## Repair checkpoint (local tests pass; CI next)
 
-- Clean main checkout and remote branches inspected; created feature branch.
-- Read previous handoff and architecture/backend requirements.
-- Existing CI covers unit tests and nghttp/nghttpd interop, but not h2spec.
-- Setting up h2spec 2.6.0 and local dependencies for a standalone reproduction.
-- No protocol changes yet. The reported 13 cases have not yet been reproduced.
+- Initial published checkpoint: 3bc33ade88ddb7596aad05e56c5e08f17dbf0637.
+- Baseline full suite: PASS, 30 files / 525 tests. Perl 5.38.2, nghttp2 1.59.0,
+  Uniform::HTTP 0.06. h2spec 2.6.0 source 70ac2294010887f48b18e2d64f5cccd48421fad1.
+- Baseline strict h2spec: 147 / 140 pass / 0 skip / 7 fail, with both request-end
+  and early-header responses in this local environment. Earlier CI observed
+  ten shared failures and three additional manual-driver shutdown failures.
+- Exact local failures: http2/5.1/{8,9,11,12}, http2/5.1.1/2,
+  http2/5.3.1/2, http2/6.3/1. Earlier CI adds http2/5.1/{5,6}, http2/6.1/2;
+  standalone closure cases are generic/3.8, http2/5.4.1/1, http2/7/1.
+- Root cause: nghttp2 discards retired stream state with modern priorities,
+  conservatively ignores invalid late frames, and ignores legacy PRIORITY
+  validation. Lower stream IDs cannot simply be rejected: local reset races
+  are valid and must remain accepted.
+- Implemented private h2_receive_guard.h shared by Perl and NativeABI input.
+  It retains coalesced ranges for peer-closed, locally reset and skipped IDs.
+  Ordinary sequential requests use one range. Fragmented histories are capped
+  at 1024 ranges, then fail with ENHANCE_YOUR_CALM rather than forgetting facts.
+  Only envelopes and five legacy PRIORITY bytes are inspected; nghttp2 retains
+  framing, HPACK, active stream validation and flow-control ownership.
+- Payload bytes remain borrowed; at most 14 bytes buffered for split envelopes.
+  No public API/version/ABI changes. Modern negotiated priorities preserved.
+- Fixed standalone harness drains GOAWAY before honoring want_read == false.
+- Current local h2spec --strict: 147 / 147 PASS / 0 skip / 0 fail.
+- Existing full suite still PASS. New t/47 regressions PASS for both input APIs,
+  byte-at-a-time and other fragmentation, coalesced frames, exact wire error
+  codes, valid local reset races, 5000 requests and history-resource bounds.
+- A transient workspace outage recovered without source loss. One trial had
+  an undefined private nghttp2 symbol; it was replaced with the public API.
+  Only results with PERL_DL_NONLAZY=1 and exact GOAWAY assertions are trusted.
+- Local build uses scratch Makefile.local.PL with system libnghttp2 and matching
+  upstream headers (Alien absent). Tracked Makefile.PL is unchanged.
 
-## Next steps
+## Remaining work (continue autonomously)
 
-1. Build the released baseline and run all h2spec suites against a minimal
-   standalone IO::Socket server that drains output before closing.
-2. Record exact failures and distinguish RFC behavior from harness defects.
-3. Add focused regression tests, fix shared engine/native boundary as needed.
-4. Run full tests, native/portable paths and h2spec; add permanent CI coverage.
-5. Publish feature checkpoints and update this section with commands/results.
+1. Complete edge-case review: peer reset after a local reset, HPACK state across
+   ignored trailers, client-side closed response streams, history coalescing.
+2. Run h2spec for early/full response, manual/native input, TCP/TLS. Add a strict
+   zero-failure CI gate with logs/artifacts and complete suite count checks.
+3. Run full cross-platform CI, distribution tests and nghttp interop.
+4. Document the bounded history resource policy and reproducible test commands.
+5. Publish final checkpoints and update this handoff with verified CI links.
 
 The older release notes below are historical. The user reports that 0.12 was
 released to GitHub and CPAN; this task is a new conformance repair.
