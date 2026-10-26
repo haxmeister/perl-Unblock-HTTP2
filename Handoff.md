@@ -1,3 +1,28 @@
+# FINAL MAIN 0.13 DOCUMENTATION AND RELEASE CHECK - 2026-10-25
+
+Maintainer authorized a focused documentation cleanup directly on main.
+Tested release source commit: a385daea433602e28a59e16d8c2b6b68471ec251.
+Documentation adjustments: Client POD explains on_data/on_finish callbacks;
+Server POD explains graceful GOAWAY drain; the short cookbook uses the
+cleartext prior-knowledge scheme and briefly describes shutdown. A concise
+release note is included in docs/RELEASE-0.13.md and MANIFEST.
+No engine behavior, public API, NativeABI, or dependency changes.
+No tag, GitHub release, or CPAN upload was performed.
+
+All three workflows passed on that exact commit:
+- Test, POD, distcheck, disttest, installed NativeABI, framework smoke;
+  Linux 5.16/latest, macOS latest, Windows Strawberry 5.40:
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40260389657
+- Strict h2spec, both nghttp2 versions, 16 modes total:
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40260389617
+- Independent nghttp/nghttpd interoperability:
+  https://github.com/haxmeister/perl-Unblock-HTTP2/actions/runs/40260389669
+
+Final release state: Unblock::HTTP2 0.13 is ready for maintainer publication.
+Tag and CPAN upload remain for maintainer action.
+
+---
+
 # MAIN RELEASE PREPARATION: Unblock::HTTP2 0.13
 Updated: 2026-10-25
 Repository: https://github.com/haxmeister/perl-Unblock-HTTP2
