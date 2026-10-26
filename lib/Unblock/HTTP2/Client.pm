@@ -739,6 +739,12 @@ An informational response arrived.
 
 A response body chunk arrived.
 
+=item C<on_data($transaction, $bytes)>
+
+Decoded response body chunks arrive without buffering the full body.
+Supplying C<on_data> selects streaming for this Transaction. Do not
+combine it with C<on_body>.
+
 =item C<on_complete($transaction)>
 
 The response completed.
@@ -747,6 +753,11 @@ The response completed.
 
 The transaction failed or its HTTP/2 stream was reset. C<$error_code> can be
 undefined when there is no HTTP/2 reset code.
+
+=item C<on_finish($transaction)>
+
+Runs once when the Transaction becomes complete, cancelled, or errored,
+after the usual completion or error callback.
 
 =item C<on_drain($transaction)>
 

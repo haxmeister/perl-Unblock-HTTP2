@@ -59,3 +59,4 @@ t/46-receive-lifecycle.t
 h2_receive_guard.h
 t/47-h2spec-regressions.t
 docs/H2SPEC.md
+docs/RELEASE-0.13.md

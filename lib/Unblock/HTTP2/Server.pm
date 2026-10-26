@@ -794,6 +794,10 @@ The Server exposes the common connection methods:
     resume_output
     close
 
+C<drain()> sends a graceful GOAWAY so no new streams are admitted while
+existing Transactions may finish. The framework must flush accepted output
+and manage transport shutdown. See L<Unblock::HTTP2::Integration>.
+
 The server can also observe RFC 9218 priority updates with C<on_priority>.
 
 =head1 SEE ALSO
